@@ -1,0 +1,93 @@
+#!/bin/bash
+# Package Plex Re-Encoder for distribution
+set -e
+
+# Read version from recode_server.py
+VERSION=$(grep -oP 'VERSION = "\K[^"]+' /opt/Recode/recode_server.py)
+[[ -z "$VERSION" ]] && VERSION="0.0.0"
+
+DIST_DIR="/tmp/recode-dist"
+TARBALL="/tmp/plex-recode-v${VERSION}.tar.gz"
+PROD_DIR="/opt/Recode-Prod"
+
+echo "Packaging Plex Re-Encoder v${VERSION}..."
+
+rm -rf "$DIST_DIR"
+mkdir -p "${DIST_DIR}/plex-recode/static"
+
+# Core app files
+cp /opt/Recode/recode_server.py "${DIST_DIR}/plex-recode/"
+cp /opt/Recode/static/index.html "${DIST_DIR}/plex-recode/static/"
+cp /opt/Recode/static/setup.html "${DIST_DIR}/plex-recode/static/"
+cp /opt/Recode/install.sh "${DIST_DIR}/plex-recode/"
+cp /opt/Recode/build-ffmpeg.sh "${DIST_DIR}/plex-recode/"
+cp /opt/Recode/requirements.txt "${DIST_DIR}/plex-recode/"
+cp /opt/Recode/LICENSE "${DIST_DIR}/plex-recode/"
+cp /opt/Recode/README.md "${DIST_DIR}/plex-recode/"
+
+# Download dovi_tool static binary for x86_64
+echo "Downloading dovi_tool..."
+DOVI_URL=$(curl -sL https://api.github.com/repos/quietvoid/dovi_tool/releases/latest \
+    | grep "browser_download_url.*x86_64-unknown-linux-musl" | grep -v ".sha256" | head -1 | cut -d'"' -f4)
+if [[ -n "$DOVI_URL" ]]; then
+    mkdir -p /tmp/dovi_dl
+    curl -sL "$DOVI_URL" -o /tmp/dovi_dl/dovi_tool.tar.gz
+    tar -xzf /tmp/dovi_dl/dovi_tool.tar.gz -C /tmp/dovi_dl 2>/dev/null
+    DOVI_BIN=$(find /tmp/dovi_dl -name "dovi_tool" -type f | head -1)
+    if [[ -n "$DOVI_BIN" ]]; then
+        mkdir -p "${DIST_DIR}/plex-recode/bin"
+        cp "$DOVI_BIN" "${DIST_DIR}/plex-recode/bin/dovi_tool"
+        chmod +x "${DIST_DIR}/plex-recode/bin/dovi_tool"
+        echo "  dovi_tool bundled"
+    fi
+    rm -rf /tmp/dovi_dl
+fi
+
+# Download mkvtoolnix binaries from AppImage
+echo "Downloading mkvtoolnix..."
+MKVTOOLNIX_URL="https://mkvtoolnix.download/appimage/MKVToolNix_GUI-97.0-x86_64.AppImage"
+MKV_TMP="/tmp/mkvtoolnix_dl"
+mkdir -p "$MKV_TMP"
+if curl -sL "$MKVTOOLNIX_URL" -o "${MKV_TMP}/mkvtoolnix.AppImage"; then
+    chmod +x "${MKV_TMP}/mkvtoolnix.AppImage"
+    cd "$MKV_TMP"
+    ./mkvtoolnix.AppImage --appimage-extract >/dev/null 2>&1
+    if [[ -f "squashfs-root/usr/bin/mkvmerge" ]]; then
+        # Create wrapper scripts that set LD_LIBRARY_PATH
+        MKVLIB_DIR="${DIST_DIR}/plex-recode/lib/mkvtoolnix"
+        mkdir -p "$MKVLIB_DIR"
+        cp squashfs-root/usr/bin/mkvmerge squashfs-root/usr/bin/mkvextract squashfs-root/usr/bin/mkvpropedit "$MKVLIB_DIR/"
+        cp -a squashfs-root/usr/lib/*.so* "$MKVLIB_DIR/" 2>/dev/null || true
+        # Create wrapper scripts
+        for tool in mkvmerge mkvextract mkvpropedit; do
+            cat > "${DIST_DIR}/plex-recode/bin/${tool}" << WRAPPER
+#!/bin/bash
+SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="\${SCRIPT_DIR}/../lib/mkvtoolnix"
+LD_LIBRARY_PATH="\${LIB_DIR}:\${LD_LIBRARY_PATH}" exec "\${LIB_DIR}/${tool}" "\$@"
+WRAPPER
+            chmod +x "${DIST_DIR}/plex-recode/bin/${tool}"
+        done
+        echo "  mkvtoolnix bundled"
+    fi
+    cd /tmp
+    rm -rf "$MKV_TMP"
+fi
+
+# Create tarball
+cd "$DIST_DIR"
+tar -czf "$TARBALL" plex-recode/
+rm -rf "$DIST_DIR"
+
+# Copy to Recode-Prod
+mkdir -p "$PROD_DIR"
+cp -f "$TARBALL" "$PROD_DIR/"
+
+echo ""
+echo "Package created: ${PROD_DIR}/plex-recode-v${VERSION}.tar.gz"
+echo "Size: $(du -h "$TARBALL" | awk '{print $1}')"
+echo ""
+echo "Installation:"
+echo "  tar -xzf plex-recode-v${VERSION}.tar.gz"
+echo "  cd plex-recode"
+echo "  sudo bash install.sh"
