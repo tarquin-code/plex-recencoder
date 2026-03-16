@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+backups/
+queue_state.json
+settings.json
+scan_cache.db
+*.tar.gz
+.claude/
