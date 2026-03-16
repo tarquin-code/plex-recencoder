@@ -21,9 +21,7 @@
 ## Quick Install
 
 ```bash
-tar -xzf plex-recode-v2.10.0.tar.gz
-cd plex-recode
-sudo bash install.sh
+wget -qO- https://github.com/tarquin-code/plex-recencoder/releases/latest/download/plex-recode.tar.gz | tar xz && cd plex-recode && sudo bash install.sh
 ```
 
 Then open `http://your-server:9877` in a browser.

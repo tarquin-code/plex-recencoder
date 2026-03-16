@@ -79,15 +79,17 @@ cd "$DIST_DIR"
 tar -czf "$TARBALL" plex-recode/
 rm -rf "$DIST_DIR"
 
-# Copy to Recode-Prod
+# Copy to Recode-Prod (versioned + fixed "latest" name)
 mkdir -p "$PROD_DIR"
 cp -f "$TARBALL" "$PROD_DIR/"
+cp -f "$TARBALL" "$PROD_DIR/plex-recode.tar.gz"
 
 echo ""
 echo "Package created: ${PROD_DIR}/plex-recode-v${VERSION}.tar.gz"
+echo "Latest copy:     ${PROD_DIR}/plex-recode.tar.gz"
 echo "Size: $(du -h "$TARBALL" | awk '{print $1}')"
 echo ""
 echo "Installation:"
-echo "  tar -xzf plex-recode-v${VERSION}.tar.gz"
+echo "  tar -xzf plex-recode.tar.gz"
 echo "  cd plex-recode"
 echo "  sudo bash install.sh"
