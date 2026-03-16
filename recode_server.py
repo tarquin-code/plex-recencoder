@@ -59,7 +59,7 @@ import uvicorn
 # =============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-VERSION = "2.10.13"
+VERSION = "2.10.14"
 BIN_DIR = os.path.join(BASE_DIR, "bin")
 os.makedirs(BIN_DIR, exist_ok=True)
 
@@ -3882,33 +3882,36 @@ async def update_apply():
                 shutil.copy2(os.path.join(BASE_DIR, "static", f), static_bak)
             _install_tasks["update"]["log"] += f"Backed up current version to {backup_dir}\n"
 
-            # Apply update — copy new files over
+            # Apply update — use sudo cp to handle root-owned files
             _install_tasks["update"]["log"] += "Applying update...\n"
-            for f in ["recode_server.py", "build-ffmpeg.sh", "requirements.txt", "README.md", "LICENSE", "install.sh"]:
-                src = os.path.join(extracted, f)
-                if os.path.isfile(src):
-                    shutil.copy2(src, os.path.join(BASE_DIR, f))
-            # Update static files
-            extracted_static = os.path.join(extracted, "static")
-            if os.path.isdir(extracted_static):
-                for f in os.listdir(extracted_static):
-                    shutil.copy2(os.path.join(extracted_static, f), os.path.join(BASE_DIR, "static", f))
-            # Update bin (new bundled tools)
-            extracted_bin = os.path.join(extracted, "bin")
-            if os.path.isdir(extracted_bin):
-                os.makedirs(os.path.join(BASE_DIR, "bin"), exist_ok=True)
-                for f in os.listdir(extracted_bin):
-                    src = os.path.join(extracted_bin, f)
-                    dst = os.path.join(BASE_DIR, "bin", f)
-                    if os.path.isdir(src):
-                        shutil.copytree(src, dst, dirs_exist_ok=True)
-                    else:
-                        shutil.copy2(src, dst)
-                        os.chmod(dst, 0o755)
-            # Update lib (bundled libraries)
-            extracted_lib = os.path.join(extracted, "lib")
-            if os.path.isdir(extracted_lib):
-                shutil.copytree(extracted_lib, os.path.join(BASE_DIR, "lib"), dirs_exist_ok=True)
+            apply_script = f"""
+set -e
+# Core files
+for f in recode_server.py build-ffmpeg.sh requirements.txt README.md LICENSE install.sh; do
+    [ -f "{extracted}/$f" ] && cp -f "{extracted}/$f" "{BASE_DIR}/$f"
+done
+# Static files
+[ -d "{extracted}/static" ] && cp -f {extracted}/static/* {BASE_DIR}/static/ 2>/dev/null || true
+# Bin files (may be root-owned)
+if [ -d "{extracted}/bin" ]; then
+    mkdir -p {BASE_DIR}/bin
+    cp -af {extracted}/bin/* {BASE_DIR}/bin/
+    find {BASE_DIR}/bin -type f -exec chmod 755 {{}} \\;
+fi
+# Lib files
+[ -d "{extracted}/lib" ] && cp -af {extracted}/lib/* {BASE_DIR}/lib/ 2>/dev/null || true
+# Fix ownership
+chown -R {os.getuid()}:{os.getgid()} {BASE_DIR}/ 2>/dev/null || true
+echo "Files copied successfully"
+"""
+            proc = await _run_sudo("bash", "-c", apply_script)
+            async for line in proc.stdout:
+                text = line.decode(errors="replace").rstrip()
+                if text:
+                    _install_tasks["update"]["log"] += text + "\n"
+            await proc.wait()
+            if proc.returncode != 0:
+                raise RuntimeError("Failed to copy update files")
 
             # Cleanup
             shutil.rmtree(tmp_dir, ignore_errors=True)
