@@ -22,3 +22,8 @@ venv/
 lib/
 mac-app/
 macos/
+CLAUDE.md
+build-ffmpeg.sh
+build-mac.sh
+install.sh
+package.sh
