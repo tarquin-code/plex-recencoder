@@ -307,11 +307,14 @@ pub async fn run_fuse_job(
             MountOption::AutoUnmount,
             MountOption::AllowOther,
             MountOption::CUSTOM(format!("max_read={}", CHUNK_SIZE)),
-            MountOption::CUSTOM("nobrowse".into()),
-            MountOption::CUSTOM("defer_permissions".into()),
-            MountOption::CUSTOM("noappledouble".into()),
-            MountOption::CUSTOM("noapplexattr".into()),
         ];
+        #[cfg(target_os = "macos")]
+        {
+            options.push(MountOption::CUSTOM("nobrowse".into()));
+            options.push(MountOption::CUSTOM("defer_permissions".into()));
+            options.push(MountOption::CUSTOM("noappledouble".into()));
+            options.push(MountOption::CUSTOM("noapplexattr".into()));
+        }
         match fuser::mount2(fs, &mount_path, &options) {
             Ok(()) => { /* mount ran and unmounted normally */ }
             Err(e) => {

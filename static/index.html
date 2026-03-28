@@ -2010,7 +2010,7 @@ tr.file-row:hover td { background: var(--bg-hover); }
             <div class="help-section" id="helpTab-about">
                 <div style="text-align:center;padding:20px 0 10px 0;">
                     <div style="font-size:28px;font-weight:700;background:linear-gradient(135deg, var(--accent), var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Recode</div>
-                    <div style="font-size:16px;color:var(--text-secondary);margin-top:4px;" id="aboutVersion">v2.22.1</div>
+                    <div style="font-size:16px;color:var(--text-secondary);margin-top:4px;" id="aboutVersion">v2.22.2</div>
                 </div>
 
                 <div style="text-align:center;margin:16px 0;">
@@ -2043,6 +2043,15 @@ tr.file-row:hover td { background: var(--bg-hover); }
                 <h4>Version History</h4>
                 <div class="example-box">
                     <div style="display:grid;gap:12px;">
+                        <div>
+                            <div style="font-weight:600;color:var(--text-primary);">v2.22.2 <span style="font-weight:400;font-size:11px;color:var(--text-muted);">— March 2026</span></div>
+                            <ul style="margin:6px 0 0 0;font-size:12px;color:var(--text-secondary);">
+                                <li><strong>Linux FUSE fix</strong> &mdash; macOS-only mount options (nobrowse, defer_permissions) no longer break FUSE mounts on Linux remote servers</li>
+                                <li><strong>Button spinners</strong> &mdash; action buttons (Add to Queue, Retry, Save Settings, Start/Stop Queue, Cancel All) show a spinner and disable while processing</li>
+                                <li><strong>CQ/Speed descriptions</strong> &mdash; helper text added to CQ, Speed, and Bitrate controls in all profiles and sidebar</li>
+                                <li><strong>Profile borders</strong> &mdash; library profiles use full colored borders matching Default profile style (1px)</li>
+                            </ul>
+                        </div>
                         <div>
                             <div style="font-weight:600;color:var(--text-primary);">v2.22.1 <span style="font-weight:400;font-size:11px;color:var(--text-muted);">— March 2026</span></div>
                             <ul style="margin:6px 0 0 0;font-size:12px;color:var(--text-secondary);">
@@ -2948,7 +2957,7 @@ tr.file-row:hover td { background: var(--bg-hover); }
             <span id="settingsUnsaved" style="font-size:11px;color:var(--warning);display:none;">Unsaved changes</span>
             <div style="display:flex;gap:8px;margin-left:auto;">
                 <button class="btn" onclick="closeSettings()">Close</button>
-                <button class="btn btn-primary" id="btnSaveSettings" onclick="saveSettings()" disabled style="opacity:0.5;">Save Settings</button>
+                <button class="btn btn-primary" id="btnSaveSettings" onclick="btnAction(this, () => saveSettings(), '✓ Saved', 2000)" disabled style="opacity:0.5;">Save Settings</button>
             </div>
         </div>
     </div>
@@ -3675,6 +3684,28 @@ function renderScanResults() {
 }
 
 function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+/** Disable a button, show spinner, run async action, then re-enable.
+ *  Usage: btnAction(btn, async () => { await fetch(...) }, 'Done!', 2000)
+ *  Or inline: onclick="btnAction(this, () => retryJob('id'))"  */
+async function btnAction(btn, action, doneText, resetMs) {
+    if (btn.disabled) return;
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    btn.innerHTML = '<span style="display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,0.3);border-top:2px solid #fff;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:4px;"></span>' + (btn.textContent.trim() || '');
+    try {
+        await action();
+        if (doneText) {
+            btn.innerHTML = doneText;
+            setTimeout(() => { btn.innerHTML = origHtml; btn.disabled = false; btn.style.opacity = ''; }, resetMs || 3000);
+        } else {
+            btn.innerHTML = origHtml; btn.disabled = false; btn.style.opacity = '';
+        }
+    } catch(e) {
+        btn.innerHTML = origHtml; btn.disabled = false; btn.style.opacity = '';
+    }
+}
 function cleanRes(r) { r = (r || '').replace(/\s*\(.*\)/, ''); if (r === '2160p') return '4K'; if (r === '2K') return '1440p'; if (/^\d+x\d+$/.test(r)) return 'SD'; return r; }
 function getHwLabel(s) {
     if (s.use_cpu) return 'CPU';
@@ -3907,8 +3938,10 @@ async function removeSelectedScanFiles() {
 }
 
 async function addSelectedToQueue() {
+    const btn = document.getElementById('btnAddQueue');
     const selected = Array.from(document.querySelectorAll('.file-select:checked')).map(cb => cb.dataset.path);
     if (!selected.length) return alert('No files selected');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span style="display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,0.3);border-top:2px solid #fff;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:4px;"></span>Adding...'; }
     const settings = getSettings();
 
     // Build audio/subtitle config and file info from scan results (avoids re-probing)
@@ -3947,6 +3980,7 @@ async function addSelectedToQueue() {
             if (selAll) selAll.checked = false;
         }
     } catch (err) { alert('Failed to add: ' + err.message); }
+    if (btn) { btn.innerHTML = 'Add Selected to Queue'; btn.disabled = false; }
 }
 
 /* =========================================================================
@@ -4095,8 +4129,8 @@ function renderQueue() {
 
     // Queue controls (always visible — even when empty, user needs Start/Stop)
     const startBtn = enabled
-        ? `<button class="btn" onclick="queueControl('stop')" style="font-size:12px;background:#e74c3c;color:#fff;">Stop Queue</button>`
-        : `<button class="btn" onclick="queueControl('start')" style="font-size:12px;background:#27ae60;color:#fff;">Start Queue</button>`;
+        ? `<button class="btn" onclick="btnAction(this, () => queueControl('stop'))" style="font-size:12px;background:#e74c3c;color:#fff;">Stop Queue</button>`
+        : `<button class="btn" onclick="btnAction(this, () => queueControl('start'))" style="font-size:12px;background:#27ae60;color:#fff;">Start Queue</button>`;
     const stopNowBtn = hasActive
         ? `<button class="btn btn-danger" onclick="queueControl('stop-now')" style="font-size:12px;">Stop &amp; Cancel</button>`
         : '';
@@ -4253,7 +4287,7 @@ function renderEncoding() {
     if (hasJobs && jobsChanged) {
         lastRenderedJobIds = currentIds;
         let jobsHtml = activeJobs.length > 1
-            ? `<div class="toolbar" style="margin-bottom:8px;"><div class="toolbar-left"><span class="info-text">${activeJobs.length} active encodes</span></div><div class="toolbar-right"><button class="btn btn-danger" onclick="cancelAllActive()" style="font-size:12px;">Cancel All</button></div></div>`
+            ? `<div class="toolbar" style="margin-bottom:8px;"><div class="toolbar-left"><span class="info-text">${activeJobs.length} active encodes</span></div><div class="toolbar-right"><button class="btn btn-danger" onclick="btnAction(this, () => cancelAllActive(), '✓ Cancelled', 2000)" style="font-size:12px;">Cancel All</button></div></div>`
             : '';
         for (const job of activeJobs) {
             const f = job.file_info;
@@ -4907,7 +4941,7 @@ function renderHistory() {
     const statusLabel = activeStatus.charAt(0).toUpperCase() + activeStatus.slice(1);
     let html = `<div class="toolbar"><div class="toolbar-left" style="display:flex;gap:4px;align-items:center;"></div>
         <div class="toolbar-right" style="display:flex;gap:4px;">
-        ${(activeStatus === 'failed' || activeStatus === 'cancelled') ? `<button class="btn btn-sm" onclick="retryAllByStatus('${activeStatus}')" title="Re-queue all ${activeStatus} jobs">${svgIcon('rotate-cw', 12)} Retry All</button>` : ''}
+        ${(activeStatus === 'failed' || activeStatus === 'cancelled') ? `<button class="btn btn-sm" onclick="btnAction(this, () => retryAllByStatus('${activeStatus}'), '✓ All Queued', 3000)" title="Re-queue all ${activeStatus} jobs">${svgIcon('rotate-cw', 12)} Retry All</button>` : ''}
         <button class="btn btn-sm" onclick="clearHistory('${activeStatus}')">Clear ${statusLabel}</button></div></div>`;
 
     // Filter bar + pager at top
@@ -5099,7 +5133,7 @@ function renderHistory() {
                 <div class="hi-detail">${detailHtml}</div>
             </div>
             <span style="font-size:10px;color:var(--text-muted);white-space:nowrap;margin-right:6px;">${dateStr}</span>
-            ${job.status !== 'done' ? `<button class="btn btn-sm" style="font-size:11px;padding:4px 10px;margin-left:4px;" onclick="event.stopPropagation(); retryJob('${job.id}')" title="Re-queue this job">${svgIcon('rotate-cw', 12)} Retry</button>` : ''}
+            ${job.status !== 'done' ? `<button class="btn btn-sm" style="font-size:11px;padding:4px 10px;margin-left:4px;" onclick="event.stopPropagation(); btnAction(this, () => retryJob('${job.id}'), '✓ Queued', 3000)" title="Re-queue this job">${svgIcon('rotate-cw', 12)} Retry</button>` : ''}
             <button class="btn btn-danger btn-sm" style="font-size:11px;padding:4px 8px;" onclick="event.stopPropagation(); deleteHistoryItem('${job.id}')" title="Remove from history">${svgIcon('x-circle', 12)}</button>
             <span class="expand-btn" id="hexp-${huid}">${svgIcon('chevron-right', 12)}</span>
             <div style="width:100%;padding-left:28px;display:none;margin-top:6px;padding-top:6px;border-top:1px solid var(--border);" id="hdet-${huid}" onclick="event.stopPropagation()">
