@@ -261,7 +261,7 @@ fn update_tray_menu_items(jobs: &[JobLog], transcodes: &[Transcode], connected: 
 
     }
 }
-const VERSION: &str = "2.22.1";
+const VERSION: &str = "2.22.2.7";
 
 // ── Recode Design System (exact CSS values) ────────────────────────────────
 const BG_PRIMARY: egui::Color32 = egui::Color32::from_rgb(13, 17, 23);

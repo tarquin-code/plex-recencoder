@@ -305,9 +305,10 @@ pub async fn run_fuse_job(
             MountOption::RO,
             MountOption::FSName("rrp".into()),
             MountOption::AutoUnmount,
-            MountOption::AllowOther,
             MountOption::CUSTOM(format!("max_read={}", CHUNK_SIZE)),
         ];
+        #[cfg(not(target_os = "macos"))]
+        options.push(MountOption::AllowOther);
         #[cfg(target_os = "macos")]
         {
             options.push(MountOption::CUSTOM("nobrowse".into()));
@@ -453,8 +454,8 @@ pub async fn run_fuse_job(
                 if bitrate == 0.0 && total_size > 0 && time_secs > 0.0 {
                     bitrate = (total_size as f64 * 8.0 / time_secs / 1000.0) as f32;
                 }
-                if frame > last_frame {
-                    last_frame = frame;
+                if frame > last_frame || (frame == 0 && total_size > 0 && total_size != last_frame) {
+                    last_frame = if frame > 0 { frame } else { total_size };
                     let _ = progress_tx.try_send(ProgressMsg { frame, time_secs, speed, bitrate_kbps: bitrate, output_size: total_size });
                 }
             }
@@ -595,21 +596,41 @@ pub async fn run_fuse_job(
     if exit_code == 0 && output_local.exists() {
         let meta = tokio::fs::metadata(&output_local).await?;
         let total = meta.len();
-        info!("Sending output: {:.1} MB", total as f64 / 1_048_576.0);
+        info!("Sending output: {:.1} GB ({} bytes)", total as f64 / 1_073_741_824.0, total);
         write_tagged(tx, STREAM_OUTPUT, &total).await?;
         let mut file = tokio::fs::File::open(&output_local).await?;
         let mut hasher = Sha256::new();
         let mut buf = vec![0u8; CHUNK_SIZE];
+        let mut sent: u64 = 0;
+        let mut last_log = std::time::Instant::now();
         loop {
             let n = file.read(&mut buf).await?;
             if n == 0 { break; }
             hasher.update(&buf[..n]);
-            tx.write_all(&buf[..n]).await?;
+            // Timeout each write to detect stalled connections (5 minutes per chunk)
+            match tokio::time::timeout(Duration::from_secs(300), tx.write_all(&buf[..n])).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    error!("Output transfer write error at {:.1} GB: {}", sent as f64 / 1_073_741_824.0, e);
+                    return Err(e.into());
+                }
+                Err(_) => {
+                    error!("Output transfer stalled at {:.1} GB — write timeout after 5 minutes", sent as f64 / 1_073_741_824.0);
+                    return Err(anyhow::anyhow!("Output transfer stalled"));
+                }
+            }
+            sent += n as u64;
+            // Log progress every 30 seconds
+            if last_log.elapsed() >= Duration::from_secs(30) {
+                let pct = if total > 0 { (sent as f64 / total as f64) * 100.0 } else { 0.0 };
+                info!("Output transfer: {:.1} GB / {:.1} GB ({:.0}%)", sent as f64 / 1_073_741_824.0, total as f64 / 1_073_741_824.0, pct);
+                last_log = std::time::Instant::now();
+            }
         }
         let hash: [u8; 32] = hasher.finalize().into();
         tx.write_all(&hash).await?;
         tx.flush().await?;
-        info!("Output sent");
+        info!("Output sent: {:.1} GB", sent as f64 / 1_073_741_824.0);
     }
 
     // Send JobComplete so the listener knows the final exit code

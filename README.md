@@ -2,7 +2,7 @@
 
 **GPU-accelerated HEVC (H.265) re-encoding for Plex media libraries with Dolby Vision support.**
 
-![Version](https://img.shields.io/badge/version-2.22.2-blue)
+![Version](https://img.shields.io/badge/version-2.22.3-blue)
 ![License](https://img.shields.io/badge/license-GPL--3.0-green)
 ![Python](https://img.shields.io/badge/python-3.9+-yellow)
 
@@ -146,9 +146,9 @@ Then open `http://your-server:9877` in a browser.
 - `mkvmerge` / `mkvextract` — MKV muxing for DV encodes
 - `mediainfo` — Detailed media analysis
 
-**macOS (in `macos/` folder):**
-- `recode-remote` — RRP server binary (ARM64, with FUSE support)
-- `ffmpeg` / `ffprobe` — Jellyfin static build with VideoToolbox
+**macOS (separate DMG download):**
+- `Recode GPU Server.app` — Native macOS app with tray icon, settings UI, and auto-cleanup
+- Includes `recode-remote`, `ffmpeg`, `ffprobe` (ARM64, VideoToolbox)
 
 ## Remote GPU Encoding
 

@@ -35,6 +35,8 @@ struct ListenerState {
     pending_data: RwLock<HashMap<String, PendingData>>,
     /// Job requests from Python server: job_id -> job details + file paths
     job_queue: RwLock<HashMap<String, JobRequest>>,
+    /// Notify status writer to flush immediately
+    status_notify: tokio::sync::Notify,
 }
 
 struct PendingData {
@@ -64,6 +66,7 @@ pub async fn run(port: u16, secret: String, status_file: String) -> Result<()> {
         secret,
         pending_data: RwLock::new(HashMap::new()),
         job_queue: RwLock::new(HashMap::new()),
+        status_notify: tokio::sync::Notify::new(),
     });
 
     // Status file writer
@@ -74,7 +77,10 @@ pub async fn run(port: u16, secret: String, status_file: String) -> Result<()> {
     }
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}
+                _ = state2.status_notify.notified() => {}
+            }
             write_status_file(&state2, &status_path).await;
         }
     });
@@ -191,18 +197,13 @@ async fn dispatch_job(
     let gpus = state.gpus.read().await;
     // Find GPU with capacity — prefer target_gpu if specified
     let candidate = if !target_gpu.is_empty() {
+        // When a specific GPU is targeted, ONLY use that GPU — don't fall back
+        // (the ffmpeg args may contain encoder-specific flags like -allow_sw for VideoToolbox)
         gpus.iter()
             .filter(|(_, g)| g.name == target_gpu)
             .filter(|(_, g)| g.last_heartbeat.elapsed().as_secs() < 45)
             .filter(|(_, g)| (g.active_jobs as usize) < g.max_jobs)
             .next()
-            .or_else(|| {
-                // Target not available, fall back to any GPU
-                gpus.iter()
-                    .filter(|(_, g)| g.last_heartbeat.elapsed().as_secs() < 45)
-                    .filter(|(_, g)| (g.active_jobs as usize) < g.max_jobs)
-                    .min_by_key(|(_, g)| g.active_jobs)
-            })
     } else {
         gpus.iter()
             .filter(|(_, g)| g.last_heartbeat.elapsed().as_secs() < 45)
@@ -224,10 +225,6 @@ async fn dispatch_job(
                     .filter(|(_, g)| g.last_heartbeat.elapsed().as_secs() < 45)
                     .filter(|(_, g)| (g.active_jobs as usize) < g.max_jobs)
                     .next()
-                    .or_else(|| gpus.iter()
-                        .filter(|(_, g)| g.last_heartbeat.elapsed().as_secs() < 45)
-                        .filter(|(_, g)| (g.active_jobs as usize) < g.max_jobs)
-                        .min_by_key(|(_, g)| g.active_jobs))
             } else {
                 gpus.iter()
                     .filter(|(_, g)| g.last_heartbeat.elapsed().as_secs() < 45)
@@ -358,15 +355,15 @@ async fn handle_control(
         gpu_capabilities,
         job_tx,
     });
+    state.status_notify.notify_one();
 
     let result: Result<()> = async {
         loop {
             tokio::select! {
                 msg = read_msg::<ReverseControlMsg, _>(&mut rx) => {
                     match msg? {
-                        ReverseControlMsg::Heartbeat { active_jobs } => {
+                        ReverseControlMsg::Heartbeat { active_jobs: _ } => {
                             if let Some(gpu) = state.gpus.write().await.get_mut(&conn_id) {
-                                gpu.active_jobs = active_jobs;
                                 gpu.last_heartbeat = std::time::Instant::now();
                             }
                         }
@@ -405,6 +402,7 @@ async fn handle_control(
     }.await;
 
     state.gpus.write().await.remove(&conn_id);
+    state.status_notify.notify_one();
     info!("GPU server '{}' disconnected", name);
     result
 }
@@ -454,7 +452,16 @@ async fn handle_data(
         }
         let (tag, payload) = match read_tagged(&mut rx).await {
             Ok(tp) => tp,
-            Err(_) => break,
+            Err(e) => {
+                warn!("Data connection lost for job {}: {}", dc.job_id, e);
+                // Write result immediately so Python doesn't wait
+                let result_path = format!("/tmp/recode/rrp/listener-jobs/{}.result", dc.job_id);
+                let _ = std::fs::write(&result_path, serde_json::json!({
+                    "exit_code": 1,
+                    "error": "GPU disconnected during encode"
+                }).to_string());
+                return Ok(());
+            }
         };
 
         match tag {

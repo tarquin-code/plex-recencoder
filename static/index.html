@@ -2010,7 +2010,7 @@ tr.file-row:hover td { background: var(--bg-hover); }
             <div class="help-section" id="helpTab-about">
                 <div style="text-align:center;padding:20px 0 10px 0;">
                     <div style="font-size:28px;font-weight:700;background:linear-gradient(135deg, var(--accent), var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Recode</div>
-                    <div style="font-size:16px;color:var(--text-secondary);margin-top:4px;" id="aboutVersion">v2.22.2</div>
+                    <div style="font-size:16px;color:var(--text-secondary);margin-top:4px;" id="aboutVersion">v2.22.3</div>
                 </div>
 
                 <div style="text-align:center;margin:16px 0;">
@@ -2043,6 +2043,21 @@ tr.file-row:hover td { background: var(--bg-hover); }
                 <h4>Version History</h4>
                 <div class="example-box">
                     <div style="display:grid;gap:12px;">
+                        <div>
+                            <div style="font-weight:600;color:var(--text-primary);">v2.22.3 <span style="font-weight:400;font-size:11px;color:var(--text-muted);">— March 2026</span></div>
+                            <ul style="margin:6px 0 0 0;font-size:12px;color:var(--text-secondary);">
+                                <li><strong>Queue head-of-line fix</strong> &mdash; jobs targeting a full remote GPU no longer block the entire queue from dispatching to other GPUs</li>
+                                <li><strong>Consistent discard badges</strong> &mdash; remote and local "discarded (larger)" jobs now show identical DISCARDED badge and size info</li>
+                                <li><strong>Remote GPU progress bars</strong> &mdash; RRP jobs on GPU servers now show real-time progress bars with speed, bitrate, and percentage</li>
+                                <li><strong>CUDA progress fix</strong> &mdash; CUDA hwaccel encodes that report frame=0/time=N/A now show progress based on output size</li>
+                                <li><strong>macFUSE allow_other fix</strong> &mdash; removed AllowOther mount option on macOS, eliminating the system permission prompt on every FUSE mount</li>
+                                <li><strong>Stale heartbeat fix</strong> &mdash; listener ignores connector&rsquo;s stale active_jobs count after reconnect, preventing GPUs from appearing permanently full</li>
+                                <li><strong>Offline GPU protection</strong> &mdash; jobs are never dispatched to offline GPUs; listener status updates immediately on connect/disconnect</li>
+                                <li><strong>Disconnect re-queue</strong> &mdash; jobs on disconnected GPUs are automatically re-queued (back of queue) instead of failing</li>
+                                <li><strong>macOS app: live status</strong> &mdash; connector status file updates on every heartbeat, fixing tray menu progress and active job count</li>
+                                <li><strong>macOS app: separate DMG</strong> &mdash; macOS binaries removed from Linux tarball, Mac app distributed as standalone DMG</li>
+                            </ul>
+                        </div>
                         <div>
                             <div style="font-weight:600;color:var(--text-primary);">v2.22.2 <span style="font-weight:400;font-size:11px;color:var(--text-muted);">— March 2026</span></div>
                             <ul style="margin:6px 0 0 0;font-size:12px;color:var(--text-secondary);">
@@ -3184,14 +3199,27 @@ function updateGpuServerStatus() {
                     const capsList = gpu.gpu_capabilities || [];
                     let capsHtml = '';
                     if (capsList.length) {
-                        const agg = {s1: false, t1: false, h1: false, s4: false, t4: false, h4: false};
-                        capsList.forEach(c => { if(c['1080p_sdr']) agg.s1=true; if(c['1080p_10bit']) agg.t1=true; if(c['1080p_hdr']) agg.h1=true; if(c['4k_sdr']) agg.s4=true; if(c['4k_10bit']) agg.t4=true; if(c['4k_hdr']) agg.h4=true; });
-                        const cs = (ok, label) => `<span style="${ok ? 'color:#3fb950;' : 'color:#f85149;text-decoration:line-through;'}">${label}</span>`;
-                        const cStyle = 'font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(139,148,158,0.15);color:var(--text-muted);font-weight:600;';
-                        capsHtml = `<span style="display:flex;gap:4px;flex-wrap:wrap;">
-                            <span style="${cStyle}">${cs(agg.s1,'1080p')} ${cs(agg.t1,'10bit')} ${cs(agg.h1,'HDR')}</span>
-                            <span style="${cStyle}">${cs(agg.s4,'4K')} ${cs(agg.t4,'10bit')} ${cs(agg.h4,'HDR')}</span>
-                        </span>`;
+                        if (capsList.length === 1) {
+                            // Single GPU — show aggregate badges
+                            const c = capsList[0];
+                            const cs = (ok, label) => `<span style="${ok ? 'color:#3fb950;' : 'color:#f85149;text-decoration:line-through;'}">${label}</span>`;
+                            const cStyle = 'font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(139,148,158,0.15);color:var(--text-muted);font-weight:600;';
+                            capsHtml = `<span style="display:flex;gap:4px;flex-wrap:wrap;">
+                                <span style="${cStyle}">${cs(c['1080p_sdr'],'1080p')} ${cs(c['1080p_10bit'],'10bit')} ${cs(c['1080p_hdr'],'HDR')}</span>
+                                <span style="${cStyle}">${cs(c['4k_sdr'],'4K')} ${cs(c['4k_10bit'],'10bit')} ${cs(c['4k_hdr'],'HDR')}</span>
+                            </span>`;
+                        } else {
+                            // Multi-GPU — show per-GPU capability rows
+                            const cs = (ok, label) => `<span style="${ok ? 'color:#3fb950;' : 'color:#f85149;text-decoration:line-through;'}">${label}</span>`;
+                            const cStyle = 'font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(139,148,158,0.12);color:var(--text-muted);font-weight:500;';
+                            capsHtml = '<span style="display:flex;gap:3px;flex-wrap:wrap;">';
+                            capsList.forEach(c => {
+                                const gpuIdx = c.gpu ?? '?';
+                                const no4k = !c['4k_sdr'] && !c['4k_10bit'] && !c['4k_hdr'];
+                                capsHtml += `<span style="${cStyle}">GPU${gpuIdx}: ${cs(c['1080p_sdr'],'1080p')} ${cs(c['4k_sdr'],'4K')}${no4k ? ' <span style="color:var(--warning);font-size:8px;">(1080p only)</span>' : ''}</span>`;
+                            });
+                            capsHtml += '</span>';
+                        }
                     } else {
                         capsHtml = '<span style="font-size:10px;color:var(--warning);"><span style="display:inline-block;width:10px;height:10px;border:2px solid rgba(210,153,34,0.3);border-top:2px solid var(--warning);border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:4px;"></span>Detecting capabilities...</span>';
                     }
@@ -3688,22 +3716,32 @@ function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 /** Disable a button, show spinner, run async action, then re-enable.
  *  Usage: btnAction(btn, async () => { await fetch(...) }, 'Done!', 2000)
  *  Or inline: onclick="btnAction(this, () => retryJob('id'))"  */
+const _btnCooldowns = new Set();
 async function btnAction(btn, action, doneText, resetMs) {
-    if (btn.disabled) return;
+    // Prevent double-clicks using both disabled state and a cooldown tracker
+    const btnId = btn.id || btn.textContent.trim();
+    if (btn.disabled || _btnCooldowns.has(btnId)) return;
+    _btnCooldowns.add(btnId);
     const origHtml = btn.innerHTML;
     btn.disabled = true;
     btn.style.opacity = '0.7';
+    btn.style.pointerEvents = 'none';
     btn.innerHTML = '<span style="display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,0.3);border-top:2px solid #fff;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:4px;"></span>' + (btn.textContent.trim() || '');
+    const minDelay = new Promise(r => setTimeout(r, 2000)); // minimum 2s cooldown
     try {
         await action();
+        await minDelay;
         if (doneText) {
             btn.innerHTML = doneText;
-            setTimeout(() => { btn.innerHTML = origHtml; btn.disabled = false; btn.style.opacity = ''; }, resetMs || 3000);
+            setTimeout(() => { btn.innerHTML = origHtml; btn.disabled = false; btn.style.opacity = ''; btn.style.pointerEvents = ''; _btnCooldowns.delete(btnId); }, resetMs || 2000);
         } else {
-            btn.innerHTML = origHtml; btn.disabled = false; btn.style.opacity = '';
+            btn.innerHTML = origHtml; btn.disabled = false; btn.style.opacity = ''; btn.style.pointerEvents = '';
+            _btnCooldowns.delete(btnId);
         }
     } catch(e) {
-        btn.innerHTML = origHtml; btn.disabled = false; btn.style.opacity = '';
+        await minDelay;
+        btn.innerHTML = origHtml; btn.disabled = false; btn.style.opacity = ''; btn.style.pointerEvents = '';
+        _btnCooldowns.delete(btnId);
     }
 }
 function cleanRes(r) { r = (r || '').replace(/\s*\(.*\)/, ''); if (r === '2160p') return '4K'; if (r === '2K') return '1440p'; if (/^\d+x\d+$/.test(r)) return 'SD'; return r; }
@@ -4461,6 +4499,12 @@ function renderExternalTranscodes() {
             const inputName = t.rrp_input ? t.rrp_input.split('/').pop() : (t.input ? t.input.split('/').pop() : 'Unknown');
             const clientBadge = t.rrp_client ? `<span class="badge badge-sm" style="background:rgba(99,204,153,0.15);color:#6c9;">Client: ${escHtml(t.rrp_client)}</span>` : '';
             const isOpen = expandedExtTranscodes.has(t.pid);
+            const rp = t.progress || {};
+            const rpPct = rp.pct || 0;
+            const rpSpeed = rp.speed || '';
+            const rpBitrate = rp.bitrate_kbps ? (rp.bitrate_kbps / 1000).toFixed(1) + ' Mbps' : '';
+            const rpSize = rp.output_size ? formatSize(rp.output_size) : '';
+            const rpPhase = rpPct > 0 ? 'encoding' : 'preparing';
             html += `
             <div class="ext-transcode" style="padding:6px 8px;margin-bottom:4px;background:var(--bg-secondary);border-radius:4px;border-left:3px solid #58a6ff;">
                 <div style="display:flex;align-items:center;gap:6px;cursor:pointer;" onclick="toggleExtTranscode(${t.pid})">
@@ -4469,7 +4513,17 @@ function renderExternalTranscodes() {
                     ${clientBadge}
                     <span style="font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(t.rrp_input || t.input || '')}">${escHtml(inputName)}</span>
                     ${t.video_codec ? `<span class="badge badge-sm badge-codec">${escHtml(t.video_codec)}</span>` : ''}
+                    ${rpSpeed ? `<span style="font-size:10px;color:var(--text-secondary);">${rpSpeed}</span>` : ''}
+                    ${rpBitrate ? `<span style="font-size:10px;color:var(--text-secondary);">${rpBitrate}</span>` : ''}
+                    ${rpSize ? `<span style="font-size:10px;color:var(--text-secondary);">${rpSize}</span>` : ''}
+                    <span style="font-size:10px;color:var(--text-secondary);">${rpPhase === 'preparing' ? 'Preparing...' : _fmtPct(rpPct)}</span>
                     <span style="font-size:10px;color:var(--text-secondary);">CPU: ${t.cpu}%</span>
+                </div>
+                <div style="margin-top:6px;">
+                    <div class="progress-bar-container" style="height:18px;border-radius:9px;margin-bottom:0;">
+                        <div class="progress-bar-fill encoding${rpPhase === 'preparing' ? ' preparing' : ''}" style="width:${rpPhase === 'preparing' ? '100' : rpPct}%"></div>
+                        <div class="progress-bar-text" style="font-size:11px;line-height:18px;">${rpPhase === 'preparing' ? 'Preparing...' : _fmtPct(rpPct)}</div>
+                    </div>
                 </div>
                 <div id="extdet-${t.pid}" class="ext-detail" style="${isOpen ? '' : 'display:none;'}margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
                     <div class="file-detail" style="margin-bottom:6px;">${escHtml(t.rrp_input || t.input || 'N/A')}</div>
@@ -4997,8 +5051,10 @@ function renderHistory() {
         const huid = job.id + '_' + _hi;  // unique ID even for duplicate job IDs
         const f = job.file_info;
         let icon, badgeClass, statusText;
+        const isDiscarded = job.status === 'skipped' && job.result && job.result.action === 'discarded';
         if (job.status === 'done') { icon = svgIcon('check-circle', 16); badgeClass = 'badge-done'; statusText = 'Done'; }
         else if (job.status === 'failed') { icon = svgIcon('x-circle', 16); badgeClass = 'badge-fail'; statusText = 'Failed'; }
+        else if (isDiscarded) { icon = svgIcon('skip-forward', 16); badgeClass = 'badge-skip'; statusText = 'Discarded'; }
         else if (job.status === 'skipped') { icon = svgIcon('skip-forward', 16); badgeClass = 'badge-skip'; statusText = 'Skipped'; }
         else if (job.status === 'cancelled') { icon = svgIcon('ban', 16); badgeClass = 'badge-cancel'; statusText = 'Cancelled'; }
         else { icon = svgIcon('help-circle', 16); badgeClass = 'badge-sdr'; statusText = job.status; }
@@ -5048,9 +5104,12 @@ function renderHistory() {
                 const cls = (job.result.saved_pct || 0) >= 0 ? '' : 'negative';
                 detailHtml += ` <span class="hi-saved ${cls}">${job.result.saved_pct >= 0 ? 'Saved' : 'Grew'} ${Math.abs(job.result.saved_pct)}%</span>`;
             }
-            if (job.result.action === 'discarded') detailHtml += ` <span class="badge badge-skip">Discarded (larger)</span>`;
+            if (isDiscarded) {
+                const pctBigger = job.result.orig_bytes > 0 ? Math.round((job.result.new_bytes - job.result.orig_bytes) / job.result.orig_bytes * 100) : 0;
+                detailHtml += ` <span class="badge badge-sm badge-skip">Larger (+${pctBigger}%)</span>`;
+            }
         }
-        if (job.error) detailHtml += ` <span style="color:var(--text-muted)">${escHtml(job.error)}</span>`;
+        if (job.error && !isDiscarded) detailHtml += ` <span style="color:var(--text-muted)">${escHtml(job.error)}</span>`;
         const elapsed = job.finished_at && job.started_at ? formatTime(job.finished_at - job.started_at) : '';
         if (elapsed) detailHtml += ` <span style="color:var(--text-muted)">${elapsed}</span>`;
 

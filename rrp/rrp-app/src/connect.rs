@@ -102,33 +102,17 @@ pub async fn run(
         drop(lim);
         info!("GPU connector: {} encoders={:?} max_jobs={} gpus={} per_gpu={:?}", name, encoders, effective, gpu_count, gpu_max_jobs_vec);
 
-        // GPU capability tests — use cached results if <24h old, otherwise re-scan
+        // GPU capability tests — always scan fresh on service restart, cache for reconnects
         let has_hw_encoder = encoders.iter().any(|e| e.contains("nvenc") || e.contains("videotoolbox") || e.contains("vaapi") || e.contains("qsv"));
         if has_hw_encoder {
             let cache_file = format!("{}/gpu_capabilities_cache.json", tmp_dir);
-            let mut use_cache = false;
-            if let Ok(meta) = std::fs::metadata(&cache_file) {
-                let age = meta.modified().ok().and_then(|m| m.elapsed().ok());
-                if let Some(age) = age {
-                    if age.as_secs() < 86400 {
-                        if let Ok(data) = std::fs::read_to_string(&cache_file) {
-                            if let Ok(cached) = serde_json::from_str::<Vec<serde_json::Value>>(&data) {
-                                if !cached.is_empty() {
-                                    info!("Using cached GPU capabilities ({:.0}h old)", age.as_secs() as f64 / 3600.0);
-                                    gpu_capabilities = cached;
-                                    use_cache = true;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if !use_cache {
-                info!("Running GPU capability tests...");
-                gpu_capabilities = crate::server::detect_gpu_capabilities(&ffmpeg, gpu_count);
-                info!("GPU capabilities: {:?}", gpu_capabilities);
-                let _ = std::fs::write(&cache_file, serde_json::to_string(&gpu_capabilities).unwrap_or_default());
-            }
+            // Delete stale cache before scanning (prevent stale data from previous runs)
+            let _ = std::fs::remove_file(&cache_file);
+            info!("Running GPU capability tests...");
+            gpu_capabilities = crate::server::detect_gpu_capabilities(&ffmpeg, gpu_count);
+            info!("GPU capabilities: {:?}", gpu_capabilities);
+            // Cache results for this session (reconnects will use in-memory copy)
+            let _ = std::fs::write(&cache_file, serde_json::to_string(&gpu_capabilities).unwrap_or_default());
         }
     }
 
@@ -157,6 +141,10 @@ pub async fn run(
             info!("GPU count changed: {} → {}", gpu_count, new_gpu_count);
         }
         let effective_max: usize = gpu_max_jobs_vec.iter().sum::<usize>().max(max_jobs.min(1));
+
+        // Sync active_jobs counter with actual running jobs (fixes stale count after disconnect)
+        let actual_active = active_job_ids.lock().unwrap().len() as u32;
+        active_jobs.store(actual_active, Ordering::Relaxed);
 
         info!("Connecting to client at {}...", address);
         write_status(&status_path, false, active_jobs.load(Ordering::Relaxed));
@@ -240,11 +228,13 @@ async fn connect_and_run(
     loop {
         tokio::select! {
             _ = heartbeat_interval.tick() => {
+                let cur_active = active_jobs.load(Ordering::Relaxed);
                 let hb = ReverseControlMsg::Heartbeat {
-                    active_jobs: active_jobs.load(Ordering::Relaxed),
+                    active_jobs: cur_active,
                 };
                 write_msg(&mut tx, &hb).await?;
                 tx.flush().await?;
+                write_status(status_path, true, cur_active);
             }
             msg = read_msg::<ReverseControlMsg, _>(&mut rx) => {
                 match msg? {
@@ -277,13 +267,28 @@ async fn connect_and_run(
                         // Register job as active (GC won't touch it)
                         aj.lock().unwrap().insert(job_id.clone());
 
-                        // Assign GPU: pick least-loaded GPU that's under its per-GPU limit
+                        // Assign GPU: pick least-loaded capable GPU
                         let assigned_gpu = {
                             let mut limits = gl.lock().await;
+                            // Check if job is 4K: large input files (>2GB) or 4K-related ffmpeg args
+                            let is_likely_4k = input_files.iter().any(|f| f.size > 2_000_000_000)
+                                || ffmpeg_args.iter().any(|a| a.contains("3840") || a.contains("2160"));
                             let mut best: Option<(usize, u32)> = None;
                             for (i, &(load, max)) in limits.iter().enumerate() {
                                 if max == 0 { continue; } // disabled
                                 if load >= max { continue; } // at capacity
+                                // Check per-GPU capabilities if job is likely 4K
+                                if is_likely_4k {
+                                    if let Some(caps) = gpu_capabilities.get(i) {
+                                        let can_4k = caps.get("4k_sdr").and_then(|v| v.as_bool()).unwrap_or(true)
+                                            || caps.get("4k_10bit").and_then(|v| v.as_bool()).unwrap_or(true)
+                                            || caps.get("4k_hdr").and_then(|v| v.as_bool()).unwrap_or(true);
+                                        if !can_4k {
+                                            info!("GPU {} skipped for likely-4K job (no 4K capability)", i);
+                                            continue;
+                                        }
+                                    }
+                                }
                                 match best {
                                     None => best = Some((i, load)),
                                     Some((_, best_load)) if load < best_load => best = Some((i, load)),
