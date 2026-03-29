@@ -58,13 +58,9 @@ import uvicorn
 # =============================================================================
 # Configuration & Constants
 # =============================================================================
-# When running from PyInstaller, __file__ points to a temp dir — use the working directory instead
-if getattr(sys, 'frozen', False):
-    BASE_DIR = os.getcwd()
-else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-VERSION = "2.22.3"
+VERSION = "2.22.3.1"
 BIN_DIR = os.path.join(BASE_DIR, "bin")
 os.makedirs(BIN_DIR, exist_ok=True)
 
@@ -5380,8 +5376,7 @@ async def start_remote_connectors():
             addr = f"{addr}:9879"
         status_file = os.path.join(rrp_tmp, f"connect-status-{i}.json")
         rrp_log = open(os.path.join(BASE_DIR, f"rrp-connect-{i}.log"), "a")
-        # Clear LD_LIBRARY_PATH to avoid PyInstaller bundle overriding system NVIDIA libs
-        connect_env = {k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"}
+        connect_env = dict(os.environ)
         proc = await asyncio.create_subprocess_exec(
             rrp_bin, "connect",
             "--address", addr,
@@ -5418,8 +5413,7 @@ async def startup():
     _gpu_scan_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     asyncio.get_event_loop().run_in_executor(_gpu_scan_executor, _run_startup_gpu_scan)
 
-    # Note: staged .new binaries are swapped by systemd ExecStartPre, not here
-    # (Swapping inside the running process corrupts PyInstaller binaries)
+    # Note: staged .new files are swapped by systemd ExecStartPre (swap-staged.sh)
 
     # Remove sudoers file if flagged from setup completion
     if app_settings.pop("_remove_sudoers_on_start", False):
@@ -5647,12 +5641,6 @@ async def update_apply():
                 src = os.path.join(BASE_DIR, f)
                 if os.path.exists(src):
                     shutil.copy2(src, backup_dir)
-            # Backup compiled binary if it exists
-            recode_bin = os.path.join(BASE_DIR, "bin", "recode")
-            if os.path.isfile(recode_bin):
-                bin_bak = os.path.join(backup_dir, "bin")
-                os.makedirs(bin_bak, exist_ok=True)
-                shutil.copy2(recode_bin, bin_bak)
             static_bak = os.path.join(backup_dir, "static")
             os.makedirs(static_bak, exist_ok=True)
             for f in os.listdir(os.path.join(BASE_DIR, "static")):
@@ -5677,15 +5665,6 @@ if [ -d "{extracted}/bin" ]; then
 fi
 # Lib files
 [ -d "{extracted}/lib" ] && cp -af {extracted}/lib/* {BASE_DIR}/lib/ 2>/dev/null || true
-# If compiled binary exists, update systemd service to use it
-if [ -x "{BASE_DIR}/bin/recode" ]; then
-    SERVICE_FILE="/etc/systemd/system/recode.service"
-    if [ -f "$SERVICE_FILE" ] && grep -q "recode_server.py" "$SERVICE_FILE"; then
-        sed -i "s|ExecStart=.*|ExecStart={BASE_DIR}/bin/recode|" "$SERVICE_FILE"
-        systemctl daemon-reload
-        echo "Updated systemd service to use compiled binary"
-    fi
-fi
 # Fix ownership
 chown -R {os.getuid()}:{os.getgid()} {BASE_DIR}/ 2>/dev/null || true
 echo "Files copied successfully"
