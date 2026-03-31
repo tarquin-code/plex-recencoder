@@ -60,7 +60,7 @@ import uvicorn
 # =============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-VERSION = "2.23.0"
+VERSION = "2.23.1"
 BIN_DIR = os.path.join(BASE_DIR, "bin")
 os.makedirs(BIN_DIR, exist_ok=True)
 
@@ -2235,7 +2235,25 @@ def _test_gpu_capabilities():
                 except Exception: pass
             log.info(f"GPU {gpu} capability {name}: {'OK' if caps[name] else 'FAIL'}")
         _gpu_capabilities[gpu] = caps
+        # Broadcast update so frontend refreshes capabilities in real-time
+        _broadcast_gpu_caps()
     log.info(f"Local GPU capabilities: {_gpu_capabilities}")
+
+_main_loop = None  # set at startup
+
+def _broadcast_gpu_caps():
+    """Push GPU capability update to all connected WebSocket clients."""
+    try:
+        loop = _main_loop
+        if loop and loop.is_running():
+            gpu_info = [{"index": g, "name": per_gpu_info.get(g, {}).get("name", f"GPU {g}"), "vram_mb": per_gpu_info.get(g, {}).get("mem_total", 0), "max_jobs": encode_queue.gpu_max_encodes(g), "capabilities": _gpu_capabilities.get(g, {}), "encoder_type": _detected_gpus[g]["encoder_type"] if g < len(_detected_gpus) else "nvenc"} for g in range(GPU_COUNT)]
+            asyncio.run_coroutine_threadsafe(
+                manager.broadcast({"type": "gpu_caps_update", "data": {"gpu_info": gpu_info, "gpu_scan_complete": _gpu_scan_complete}}),
+                loop
+            )
+            log.info(f"Broadcast gpu_caps_update ({sum(1 for g in range(GPU_COUNT) if _gpu_capabilities.get(g))}/{GPU_COUNT} GPUs probed)")
+    except Exception as e:
+        log.warning(f"Failed to broadcast gpu_caps_update: {e}")
 
 def _run_startup_gpu_scan():
     """Run all GPU tests (Vulkan + capabilities) in background. Called from startup event."""
@@ -2244,6 +2262,7 @@ def _run_startup_gpu_scan():
     _run_vulkan_test()
     _test_gpu_capabilities()
     _gpu_scan_complete = True
+    _broadcast_gpu_caps()
     log.info("Background GPU scan complete")
 
 # Not called at module load — deferred to startup event for fast server start
@@ -5606,10 +5625,13 @@ async def stop_remote_connectors():
 
 @app.on_event("startup")
 async def startup():
+    # Capture the event loop for background threads to use
+    global _main_loop
+    _main_loop = asyncio.get_event_loop()
     # Run GPU capability scan in background thread (non-blocking)
     import concurrent.futures
     _gpu_scan_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    asyncio.get_event_loop().run_in_executor(_gpu_scan_executor, _run_startup_gpu_scan)
+    _main_loop.run_in_executor(_gpu_scan_executor, _run_startup_gpu_scan)
 
     # Note: staged .new files are swapped by systemd ExecStartPre (swap-staged.sh)
 
@@ -5863,8 +5885,12 @@ if [ -d "{extracted}/bin" ]; then
 fi
 # Lib files
 [ -d "{extracted}/lib" ] && cp -af {extracted}/lib/* {BASE_DIR}/lib/ 2>/dev/null || true
-# Fix ownership
-chown -R {os.getuid()}:{os.getgid()} {BASE_DIR}/ 2>/dev/null || true
+# Fix ownership — use the service user, not root
+SVC_USER=$(grep '^User=' /etc/systemd/system/recode.service 2>/dev/null | cut -d= -f2)
+SVC_GROUP=$(grep '^Group=' /etc/systemd/system/recode.service 2>/dev/null | cut -d= -f2)
+SVC_USER=${{SVC_USER:-{os.getuid()}}}
+SVC_GROUP=${{SVC_GROUP:-{os.getgid()}}}
+chown -R "$SVC_USER:$SVC_GROUP" {BASE_DIR}/ 2>/dev/null || true
 echo "Files copied successfully"
 """
             proc = await _run_sudo("bash", "-c", apply_script)
@@ -5906,24 +5932,14 @@ async def system_check():
     results["vulkan_available"] = _has_libplacebo
     results["vulkan_version"] = _get_vulkan_version()
 
-    # Check GPU
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "nvidia-smi", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        stdout, _ = await proc.communicate()
-        results["gpu"] = proc.returncode == 0
-        results["gpu_count"] = GPU_COUNT
-        results["version"] = VERSION
-        results["max_gpu_encodes"] = sum(encode_queue.gpu_max_encodes(i) for i in range(GPU_COUNT)) if GPU_COUNT > 0 else 1
-        if results["gpu"]:
-            lines = stdout.decode().strip().split("\n")
-            for line in lines:
-                if "NVIDIA" in line and ("RTX" in line or "GTX" in line or "Tesla" in line or "Quadro" in line or "A100" in line or "A10" in line):
-                    results["gpu_name"] = line.strip()
-                    break
-    except Exception:
-        results["gpu"] = False
+    # Version and GPU count — always set
+    results["version"] = VERSION
+    results["gpu_count"] = GPU_COUNT
+    results["gpu"] = GPU_COUNT > 0
+    results["max_gpu_encodes"] = sum(encode_queue.gpu_max_encodes(i) for i in range(GPU_COUNT)) if GPU_COUNT > 0 else 1
+    # GPU name from detected GPUs
+    if _detected_gpus:
+        results["gpu_name"] = _detected_gpus[0]["name"]
 
     # GPU info for settings UI
     results["gpu_info"] = [{"index": g, "name": per_gpu_info.get(g, {}).get("name", f"GPU {g}"), "vram_mb": per_gpu_info.get(g, {}).get("mem_total", 0), "max_jobs": encode_queue.gpu_max_encodes(g), "capabilities": _gpu_capabilities.get(g, {})} for g in range(GPU_COUNT)]

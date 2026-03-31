@@ -117,7 +117,7 @@ async fn write_status_file(state: &ListenerState, path: &PathBuf) {
             "max_jobs": g.max_jobs,
             "active_jobs": g.active_jobs,
             "has_fuse": g.has_fuse,
-            "online": g.last_heartbeat.elapsed().as_secs() < 45 && !g.gpu_capabilities.is_empty(),
+            "online": g.last_heartbeat.elapsed().as_secs() < 45,
             "gpu_capabilities": g.gpu_capabilities,
         })
     }).collect();

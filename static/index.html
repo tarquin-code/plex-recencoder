@@ -2010,7 +2010,7 @@ tr.file-row:hover td { background: var(--bg-hover); }
             <div class="help-section" id="helpTab-about">
                 <div style="text-align:center;padding:20px 0 10px 0;">
                     <div style="font-size:28px;font-weight:700;background:linear-gradient(135deg, var(--accent), var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Recode</div>
-                    <div style="font-size:16px;color:var(--text-secondary);margin-top:4px;" id="aboutVersion">v2.23.0</div>
+                    <div style="font-size:16px;color:var(--text-secondary);margin-top:4px;" id="aboutVersion">v2.23.1</div>
                 </div>
 
                 <div style="text-align:center;margin:16px 0;">
@@ -2043,6 +2043,17 @@ tr.file-row:hover td { background: var(--bg-hover); }
                 <h4>Version History</h4>
                 <div class="example-box">
                     <div style="display:grid;gap:12px;">
+                        <div>
+                            <div style="font-weight:600;color:var(--text-primary);">v2.23.1 <span style="font-weight:400;font-size:11px;color:var(--text-muted);">— March 2026</span></div>
+                            <ul style="margin:6px 0 0 0;font-size:12px;color:var(--text-secondary);">
+                                <li><strong>GPU capability matrix</strong> &mdash; redesigned Local and Connected GPU displays with aligned grid showing SDR, 10bit, HDR, Dolby Vision, and Jobs per resolution</li>
+                                <li><strong>Live capability probing</strong> &mdash; GPU capabilities update in real-time via WebSocket as each GPU is tested, with spinning indicators during probe</li>
+                                <li><strong>Speed slider</strong> &mdash; settings profiles use range slider for Speed (matching sidebar) instead of dropdown</li>
+                                <li><strong>CPU server support</strong> &mdash; servers without GPU hardware now show as online with full CPU encoding capabilities</li>
+                                <li><strong>Version display fix</strong> &mdash; version number now shows correctly on servers without NVIDIA GPUs</li>
+                                <li><strong>File ownership fix</strong> &mdash; swap-staged.sh and update scripts set correct ownership matching the systemd service user</li>
+                            </ul>
+                        </div>
                         <div>
                             <div style="font-weight:600;color:var(--text-primary);">v2.23.0 <span style="font-weight:400;font-size:11px;color:var(--text-muted);">— March 2026</span></div>
                             <ul style="margin:6px 0 0 0;font-size:12px;color:var(--text-secondary);">
@@ -2701,16 +2712,8 @@ tr.file-row:hover td { background: var(--bg-hover); }
                                 </select>
                             </div>
                             <div class="form-group" style="margin:0;">
-                                <label style="font-size:11px;">Speed</label>
-                                <select id="setSpeed" style="font-size:12px;">
-                                    <option value="p1">p1 (fastest)</option>
-                                    <option value="p2">p2</option>
-                                    <option value="p3">p3</option>
-                                    <option value="p4">p4</option>
-                                    <option value="p5">p5 (default)</option>
-                                    <option value="p6">p6</option>
-                                    <option value="p7">p7 (best quality)</option>
-                                </select>
+                                <label style="font-size:11px;">Speed: <span id="setSpeedVal">p5</span></label>
+                                <input type="range" id="setSpeed" value="5" min="1" max="7" oninput="document.getElementById('setSpeedVal').textContent='p'+this.value;" style="font-size:12px;">
                                 <span class="set-desc">p1 = fastest, p7 = best quality</span>
                             </div>
                             <div class="form-group" style="margin:0;">
@@ -3117,6 +3120,15 @@ function handleMessage(msg) {
         if (aj) { aj.progress = prog; }
         if (state.current && state.current.id === msg.data.id) { state.current.progress = prog; }
         renderProgress();
+    } else if (msg.type === 'gpu_caps_update') {
+        if (msg.data && msg.data.gpu_info) {
+            if (!state.system) state.system = {};
+            state.system.gpu_info = msg.data.gpu_info;
+            const modal = document.getElementById('settingsModal');
+            if (modal && modal.classList.contains('open')) {
+                renderGpuToggles();
+            }
+        }
     } else if (msg.type === 'scan_progress') {
         renderScanProgress(msg.data);
     } else if (msg.type === 'scan_results_batch') {
@@ -3202,47 +3214,75 @@ function updateGpuServerStatus() {
                 let html = '<div style="font-size:11px;color:var(--text-secondary);font-weight:500;margin-bottom:4px;">Connected GPUs</div>';
                 onlineGpus.forEach(gpu => {
                     const enc = gpu.encoders || [];
-                    const h265 = enc.filter(e => e.startsWith('hevc_') || e === 'libx265');
-                    const h264 = enc.filter(e => e.startsWith('h264_') || e === 'libx264');
-                    const h265short = h265.map(e => e.replace('hevc_','').replace('/no-temporal-aq','*').replace('libx265','cpu'));
-                    const h264short = h264.map(e => e.replace('h264_','').replace('libx264','cpu'));
-                    const badges = [];
-                    if (h265.length) badges.push('<span style="background:rgba(88,166,255,0.15);color:#58a6ff;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;">H.265 ' + h265short.join(', ') + '</span>');
-                    if (h264.length) badges.push('<span style="background:rgba(63,185,80,0.15);color:#3fb950;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;">H.264 ' + h264short.join(', ') + '</span>');
+                    const isCpu = gpu.encoder_type === 'cpu';
+                    const encLabel = isCpu ? 'CPU' : 'GPU';
+                    const hasHevc = enc.some(e => e.startsWith('hevc_') || e === 'libx265');
+                    const hasH264 = enc.some(e => e.startsWith('h264_') || e === 'libx264');
                     const capsList = gpu.gpu_capabilities || [];
+
+                    // Capability table — always same columns for alignment
+                    const tick = '&#10003;';
+                    const cross = '&#10007;';
+                    const capCell = (ok) => `<td style="text-align:center;width:36px;padding:1px 4px;color:${ok ? '#3fb950' : '#f85149'};font-size:11px;font-weight:600;">${ok ? tick : cross}</td>`;
+                    const hdrCell = (label) => `<th style="text-align:center;width:${label === 'Dolby V' ? '46px' : '36px'};padding:1px 4px;font-size:9px;color:var(--text-muted);font-weight:500;">${label}</th>`;
+                    const rowLabel = (label) => `<td style="font-size:9px;color:var(--text-muted);padding-right:6px;white-space:nowrap;">${label}</td>`;
                     let capsHtml = '';
-                    if (capsList.length) {
-                        if (capsList.length === 1) {
-                            // Single GPU — show aggregate badges
-                            const c = capsList[0];
-                            const cs = (ok, label) => `<span style="${ok ? 'color:#3fb950;' : 'color:#f85149;text-decoration:line-through;'}">${label}</span>`;
-                            const cStyle = 'font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(139,148,158,0.15);color:var(--text-muted);font-weight:600;';
-                            capsHtml = `<span style="display:flex;gap:4px;flex-wrap:wrap;">
-                                <span style="${cStyle}">${cs(c['1080p_sdr'],'1080p')} ${cs(c['1080p_10bit'],'10bit')} ${cs(c['1080p_hdr'],'HDR')}</span>
-                                <span style="${cStyle}">${cs(c['4k_sdr'],'4K')} ${cs(c['4k_10bit'],'10bit')} ${cs(c['4k_hdr'],'HDR')}</span>
-                            </span>`;
-                        } else {
-                            // Multi-GPU — show per-GPU capability rows
-                            const cs = (ok, label) => `<span style="${ok ? 'color:#3fb950;' : 'color:#f85149;text-decoration:line-through;'}">${label}</span>`;
-                            const cStyle = 'font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(139,148,158,0.12);color:var(--text-muted);font-weight:500;';
-                            capsHtml = '<span style="display:flex;gap:3px;flex-wrap:wrap;">';
-                            capsList.forEach(c => {
-                                const gpuIdx = c.gpu ?? '?';
-                                const no4k = !c['4k_sdr'] && !c['4k_10bit'] && !c['4k_hdr'];
-                                capsHtml += `<span style="${cStyle}">GPU${gpuIdx}: ${cs(c['1080p_sdr'],'1080p')} ${cs(c['4k_sdr'],'4K')}${no4k ? ' <span style="color:var(--warning);font-size:8px;">(1080p only)</span>' : ''}</span>`;
-                            });
-                            capsHtml += '</span>';
-                        }
+
+                    const jobsCell = `<td style="text-align:center;padding:1px 6px;font-size:11px;font-weight:600;color:var(--text-secondary);">${gpu.active_jobs || 0}/${gpu.max_jobs || 1}</td>`;
+
+                    const jobsVal = `${gpu.active_jobs || 0}/${gpu.max_jobs || 1}`;
+                    const jobsTd = `<td style="text-align:center;padding:1px 6px;font-size:11px;font-weight:600;color:var(--text-secondary);">${jobsVal}</td>`;
+
+                    if (isCpu && !capsList.length) {
+                        capsHtml = `<table style="border-collapse:collapse;">
+                            <tr><th style="width:40px;"></th>${hdrCell('SDR')}${hdrCell('10bit')}${hdrCell('HDR')}${hdrCell('Dolby V')}${hdrCell('Jobs')}</tr>
+                            <tr>${rowLabel('1080p')}${capCell(true)}${capCell(true)}${capCell(true)}${capCell(true)}${jobsTd}</tr>
+                            <tr>${rowLabel('4K')}${capCell(true)}${capCell(true)}${capCell(true)}${capCell(true)}<td></td></tr>
+                        </table>`;
+                    } else if (capsList.length >= 1 && capsList.length <= 2) {
+                        const c = capsList[0];
+                        capsHtml = `<table style="border-collapse:collapse;">
+                            <tr><th style="width:40px;"></th>${hdrCell('SDR')}${hdrCell('10bit')}${hdrCell('HDR')}${hdrCell('Dolby V')}${hdrCell('Jobs')}</tr>
+                            <tr>${rowLabel('1080p')}${capCell(c['1080p_sdr'])}${capCell(c['1080p_10bit'])}${capCell(c['1080p_hdr'])}${capCell(c['1080p_hdr'])}${jobsTd}</tr>
+                            <tr>${rowLabel('4K')}${capCell(c['4k_sdr'])}${capCell(c['4k_10bit'])}${capCell(c['4k_hdr'])}${capCell(c['4k_hdr'])}<td></td></tr>
+                        </table>`;
+                    } else if (capsList.length > 2) {
+                        const agg = {s1: false, t1: false, h1: false, s4: false, t4: false, h4: false};
+                        capsList.forEach(c => {
+                            if (c['1080p_sdr']) agg.s1 = true; if (c['1080p_10bit']) agg.t1 = true; if (c['1080p_hdr']) agg.h1 = true;
+                            if (c['4k_sdr']) agg.s4 = true; if (c['4k_10bit']) agg.t4 = true; if (c['4k_hdr']) agg.h4 = true;
+                        });
+                        capsHtml = `<table style="border-collapse:collapse;">
+                            <tr><th style="width:40px;"></th>${hdrCell('SDR')}${hdrCell('10bit')}${hdrCell('HDR')}${hdrCell('Dolby V')}${hdrCell('Jobs')}</tr>
+                            <tr>${rowLabel('1080p')}${capCell(agg.s1)}${capCell(agg.t1)}${capCell(agg.h1)}${capCell(agg.h1)}${jobsTd}</tr>
+                            <tr>${rowLabel('4K')}${capCell(agg.s4)}${capCell(agg.t4)}${capCell(agg.h4)}${capCell(agg.h4)}<td></td></tr>
+                        </table>`;
                     } else {
-                        capsHtml = '<span style="font-size:10px;color:var(--warning);"><span style="display:inline-block;width:10px;height:10px;border:2px solid rgba(210,153,34,0.3);border-top:2px solid var(--warning);border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:4px;"></span>Detecting capabilities...</span>';
+                        const probeCell = `<td style="text-align:center;width:36px;padding:1px 4px;"><span style="display:inline-block;width:8px;height:8px;border:2px solid rgba(210,153,34,0.3);border-top:2px solid var(--warning);border-radius:50%;animation:spin 0.8s linear infinite;"></span></td>`;
+                        const jobsProbe = `<td style="text-align:center;padding:1px 6px;font-size:11px;font-weight:600;color:var(--text-secondary);">${gpu.active_jobs || 0}/${gpu.max_jobs || 1}</td>`;
+                        capsHtml = `<table style="border-collapse:collapse;">
+                            <tr><th style="width:40px;"></th>${hdrCell('SDR')}${hdrCell('10bit')}${hdrCell('HDR')}${hdrCell('Dolby V')}${hdrCell('Jobs')}</tr>
+                            <tr>${rowLabel('1080p')}${probeCell}${probeCell}${probeCell}${probeCell}${jobsProbe}</tr>
+                            <tr>${rowLabel('4K')}${probeCell}${probeCell}${probeCell}${probeCell}<td></td></tr>
+                        </table>`;
                     }
-                    html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;margin-bottom:4px;flex-wrap:wrap;">
-                        <span style="color:var(--success);font-size:10px;">&#9679;</span>
-                        <span style="font-weight:500;font-size:12px;">${escHtml(gpu.name || 'Unknown')}</span>
-                        <span style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);">${escHtml(gpu.address || '')}</span>
-                        ${badges.join(' ')}
-                        ${capsHtml}
-                        <span style="font-size:11px;color:var(--text-muted);margin-left:auto;">${gpu.active_jobs || 0}/${gpu.max_jobs || 1} jobs</span>
+
+                    const encColor = isCpu ? 'rgba(210,153,34,0.15)' : 'rgba(88,166,255,0.15)';
+                    const encTextColor = isCpu ? 'var(--warning)' : '#58a6ff';
+
+                    html += `<div style="display:grid;grid-template-columns:180px 80px 1fr;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;margin-bottom:4px;">
+                        <div style="display:flex;align-items:center;gap:6px;overflow:hidden;">
+                            <span style="color:var(--success);font-size:10px;flex-shrink:0;">&#9679;</span>
+                            <span style="font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(gpu.name || 'Unknown')}</span>
+                        </div>
+                        <div style="display:flex;flex-direction:column;gap:2px;">
+                            <span style="background:${encColor};color:${encTextColor};padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;text-align:center;">${encLabel}</span>
+                            <div style="display:flex;gap:3px;">
+                                ${hasH264 ? '<span class="badge badge-sm" style="background:rgba(63,185,80,0.15);color:#3fb950;flex:1;text-align:center;">H.264</span>' : ''}
+                                ${hasHevc ? '<span class="badge badge-sm badge-codec" style="flex:1;text-align:center;">H.265</span>' : ''}
+                            </div>
+                        </div>
+                        <div>${capsHtml}</div>
                     </div>`;
                 });
                 listEl.innerHTML = html;
@@ -5867,6 +5907,80 @@ function formatSize(bytes) {
 /* =========================================================================
    Settings
    ========================================================================= */
+async function renderGpuToggles() {
+    const gpuToggleList = document.getElementById('gpuToggleList');
+    if (!gpuToggleList) return;
+    // Ensure system info is loaded
+    if (!state.system || !state.system.gpu_info) {
+        try { await checkSystem(); } catch(e) {}
+    }
+    const gpuInfo = state.system?.gpu_info || [];
+    const disabledGpus = window._settingsDisabledGpus || [];
+    const gpuMaxJobs = window._settingsGpuMaxJobs || {};
+    if (gpuInfo.length > 0) {
+        gpuToggleList.innerHTML = gpuInfo.map(g => {
+            const disabled = disabledGpus.includes(g.index);
+            const vram = g.vram_mb >= 1024 ? (g.vram_mb/1024).toFixed(1).replace(/\.0$/,'') + ' GB' : g.vram_mb + ' MB';
+            const autoMax = g.max_jobs || 1;
+            const userMax = gpuMaxJobs[String(g.index)];
+            const currentMax = userMax !== undefined ? userMax : autoMax;
+            const maxOpts = Array.from({length: 8}, (_,i) => i+1).map(n =>
+                `<option value="${n}" ${n === currentMax ? 'selected' : ''}>${n}</option>`
+            ).join('');
+            const caps = g.capabilities || {};
+            const hasCaps = Object.keys(caps).length > 0;
+            const isCpuEnc = (g.encoder_type || '') === 'cpu';
+            const encLabel = isCpuEnc ? 'CPU' : 'GPU';
+            const encColor = isCpuEnc ? 'rgba(210,153,34,0.15)' : 'rgba(88,166,255,0.15)';
+            const encTextColor = isCpuEnc ? 'var(--warning)' : '#58a6ff';
+            const tick = '&#10003;', cross = '&#10007;';
+            const capCell = (ok) => `<td style="text-align:center;width:36px;padding:1px 4px;color:${ok ? '#3fb950' : '#f85149'};font-size:11px;font-weight:600;">${ok ? tick : cross}</td>`;
+            const hdrCell = (label) => `<th style="text-align:center;width:${label === 'Dolby V' ? '46px' : label === 'Max Jobs' ? '55px' : '36px'};padding:1px 4px;font-size:9px;color:var(--text-muted);font-weight:500;">${label}</th>`;
+            const rowLabel = (label) => `<td style="font-size:9px;color:var(--text-muted);padding-right:6px;white-space:nowrap;">${label}</td>`;
+            const maxJobsSelect = `<td style="text-align:center;padding:1px 4px;"><select style="font-size:11px;width:auto;min-width:45px;padding:1px 2px;" onchange="setGpuMaxJobs(${g.index}, parseInt(this.value))" ${disabled ? 'disabled' : ''}>${maxOpts}</select></td>`;
+            let capsTable = '';
+            if (hasCaps) {
+                capsTable = `<table style="border-collapse:collapse;">
+                    <tr><th style="width:40px;"></th>${hdrCell('SDR')}${hdrCell('10bit')}${hdrCell('HDR')}${hdrCell('Dolby V')}${hdrCell('Max Jobs')}</tr>
+                    <tr>${rowLabel('1080p')}${capCell(caps['1080p_sdr'])}${capCell(caps['1080p_10bit'])}${capCell(caps['1080p_hdr'])}${capCell(caps['1080p_hdr'])}${maxJobsSelect}</tr>
+                    <tr>${rowLabel('4K')}${capCell(caps['4k_sdr'])}${capCell(caps['4k_10bit'])}${capCell(caps['4k_hdr'])}${capCell(caps['4k_hdr'])}<td></td></tr>
+                </table>`;
+            } else if (isCpuEnc) {
+                capsTable = `<table style="border-collapse:collapse;">
+                    <tr><th style="width:40px;"></th>${hdrCell('SDR')}${hdrCell('10bit')}${hdrCell('HDR')}${hdrCell('Dolby V')}${hdrCell('Max Jobs')}</tr>
+                    <tr>${rowLabel('1080p')}${capCell(true)}${capCell(true)}${capCell(true)}${capCell(true)}${maxJobsSelect}</tr>
+                    <tr>${rowLabel('4K')}${capCell(true)}${capCell(true)}${capCell(true)}${capCell(true)}<td></td></tr>
+                </table>`;
+            } else {
+                const probeCell = `<td style="text-align:center;width:36px;padding:1px 4px;"><span style="display:inline-block;width:8px;height:8px;border:2px solid rgba(210,153,34,0.3);border-top:2px solid var(--warning);border-radius:50%;animation:spin 0.8s linear infinite;"></span></td>`;
+                capsTable = `<table style="border-collapse:collapse;">
+                    <tr><th style="width:40px;"></th>${hdrCell('SDR')}${hdrCell('10bit')}${hdrCell('HDR')}${hdrCell('Dolby V')}${hdrCell('Max Jobs')}</tr>
+                    <tr>${rowLabel('1080p')}${probeCell}${probeCell}${probeCell}${probeCell}${maxJobsSelect}</tr>
+                    <tr>${rowLabel('4K')}${probeCell}${probeCell}${probeCell}${probeCell}<td></td></tr>
+                </table>`;
+            }
+            return `<div style="display:grid;grid-template-columns:32px 180px 80px 1fr;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;margin-bottom:4px;${disabled ? 'opacity:0.4;' : ''}">
+                <button class="btn btn-sm btn-power" title="${disabled ? 'Enable' : 'Disable'}" style="width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;background:${disabled ? 'var(--error)' : 'var(--success)'};color:#fff;cursor:pointer;border-radius:6px;flex-shrink:0;" onclick="toggleGpu(${g.index}, ${!disabled});openSettings();">${svgIcon('power', 14)}</button>
+                <div style="overflow:hidden;">
+                    <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(g.name)}</div>
+                    <div style="font-size:10px;color:var(--text-muted);">${vram} VRAM</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:2px;">
+                    <span style="background:${encColor};color:${encTextColor};padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;text-align:center;">${encLabel}</span>
+                    <div style="display:flex;gap:3px;">
+                        <span class="badge badge-sm" style="background:rgba(63,185,80,0.15);color:#3fb950;flex:1;text-align:center;">H.264</span>
+                        <span class="badge badge-sm badge-codec" style="flex:1;text-align:center;">H.265</span>
+                    </div>
+                </div>
+                <div>${capsTable}</div>
+            </div>`;
+        }).join('');
+        document.getElementById('gpuToggleSection').style.display = '';
+    } else {
+        document.getElementById('gpuToggleSection').style.display = 'none';
+    }
+}
+
 async function openSettings() {
     try {
         const res = await fetch('/api/settings');
@@ -5890,7 +6004,9 @@ async function openSettings() {
         const setBrVal = parseInt(String(s.maxbitrate || '20M').replace(/M/i, '')) || 20;
         document.getElementById('setMaxbitrate').value = setBrVal;
         document.getElementById('setMaxbitrateVal').textContent = setBrVal;
-        document.getElementById('setSpeed').value = s.speed || 'p5';
+        const _speedNum = parseInt((s.speed || 'p5').replace('p', '')) || 5;
+        document.getElementById('setSpeed').value = _speedNum;
+        document.getElementById('setSpeedVal').textContent = 'p' + _speedNum;
         document.getElementById('setResize').value = s.resize || 'original';
         document.getElementById('setAudioFilter').value = s.audio_filter || 'all';
         document.getElementById('setAudioCodec').value = s.audio_codec || 'libopus';
@@ -5927,44 +6043,9 @@ async function openSettings() {
         // max_concurrent_encodes removed — per-GPU max_jobs used instead
         document.getElementById('setAutoStartQueue').checked = !!s.auto_start_queue;
         // GPU toggles
-        const gpuToggleList = document.getElementById('gpuToggleList');
-        const gpuInfo = s.gpu_info || state.system?.gpu_info || [];
-        const disabledGpus = s.disabled_gpus || [];
-        if (gpuInfo.length > 0) {
-            const gpuMaxJobs = s.gpu_max_jobs || {};
-            gpuToggleList.innerHTML = gpuInfo.map(g => {
-                const disabled = disabledGpus.includes(g.index);
-                const vram = g.vram_mb >= 1024 ? (g.vram_mb/1024).toFixed(1).replace(/\.0$/,'') + ' GB' : g.vram_mb + ' MB';
-                const autoMax = g.max_jobs || 1;
-                const userMax = gpuMaxJobs[String(g.index)];
-                const currentMax = userMax !== undefined ? userMax : autoMax;
-                const maxOpts = Array.from({length: 8}, (_,i) => i+1).map(n =>
-                    `<option value="${n}" ${n === currentMax ? 'selected' : ''}>${n}</option>`
-                ).join('');
-                const caps = g.capabilities || {};
-                const capSpan = (ok, label) => ok === undefined ? '' : `<span style="${ok ? 'color:#3fb950;' : 'color:#f85149;text-decoration:line-through;'}">${label}</span>`;
-                const capStyle = 'font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(139,148,158,0.15);color:var(--text-muted);font-weight:600;';
-                const capHtml = Object.keys(caps).length > 0 ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;">
-                    <span style="${capStyle}">${capSpan(caps['1080p_sdr'], '1080p')} ${capSpan(caps['1080p_10bit'], '10bit')} ${capSpan(caps['1080p_hdr'], 'HDR')}</span>
-                    <span style="${capStyle}">${capSpan(caps['4k_sdr'], '4K')} ${capSpan(caps['4k_10bit'], '10bit')} ${capSpan(caps['4k_hdr'], 'HDR')}</span>
-                </div>` : '';
-                return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;padding:8px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;${disabled ? 'opacity:0.4;' : ''}">
-                    <button class="btn btn-sm btn-power" title="${disabled ? 'Enable' : 'Disable'}" style="width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;background:${disabled ? 'var(--error)' : 'var(--success)'};color:#fff;cursor:pointer;border-radius:6px;flex-shrink:0;" onclick="toggleGpu(${g.index}, ${!disabled});openSettings();">${svgIcon('power', 14)}</button>
-                    <div style="flex:1;min-width:0;">
-                        <div style="font-size:12px;font-weight:600;">GPU ${g.index} <span style="font-weight:400;color:var(--text-muted);">${escHtml(g.name)}</span></div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:1px;">${vram} VRAM</div>
-                        ${capHtml}
-                    </div>
-                    <div style="flex-shrink:0;">
-                        <div style="font-size:10px;color:var(--text-muted);margin-bottom:2px;">Max Jobs</div>
-                        <select style="font-size:12px;width:auto;min-width:55px;" onchange="setGpuMaxJobs(${g.index}, parseInt(this.value))" ${disabled ? 'disabled' : ''}>${maxOpts}</select>
-                    </div>
-                </div>`;
-            }).join('');
-            document.getElementById('gpuToggleSection').style.display = '';
-        } else {
-            document.getElementById('gpuToggleSection').style.display = 'none';
-        }
+        window._settingsDisabledGpus = s.disabled_gpus || [];
+        window._settingsGpuMaxJobs = s.gpu_max_jobs || {};
+        await renderGpuToggles();
         const cpuThreads = s.cpu_threads || 0;
         const cpuSlider = document.getElementById('setCpuThreads');
         const cpuCount = (state.system && state.system.cpu_count) || 32;
@@ -6554,7 +6635,7 @@ async function saveSettings() {
         gpu_target: document.getElementById('setGpuTarget').value,
         cq: parseInt(document.getElementById('setCq').value) || 24,
         maxbitrate: document.getElementById('setMaxbitrate').value + 'M',
-        speed: document.getElementById('setSpeed').value,
+        speed: 'p' + document.getElementById('setSpeed').value,
         resize: document.getElementById('setResize').value,
         audio_filter: document.getElementById('setAudioFilter').value,
         audio_codec: document.getElementById('setAudioCodec').value,
@@ -7356,16 +7437,8 @@ function renderLibraryProfiles() {
                     </select>
                 </div>
                 <div class="form-group" style="margin:0;">
-                    <label style="font-size:11px;">Speed</label>
-                    <select ${isCustom?'':'disabled'} onchange="updateLibProfile('${escHtml(lpath)}','speed',this.value)" style="font-size:12px;">
-                        <option value="p1" ${p.speed==='p1'?'selected':''}>p1 (fastest)</option>
-                        <option value="p2" ${p.speed==='p2'?'selected':''}>p2</option>
-                        <option value="p3" ${p.speed==='p3'?'selected':''}>p3</option>
-                        <option value="p4" ${p.speed==='p4'?'selected':''}>p4</option>
-                        <option value="p5" ${(p.speed||'p5')==='p5'?'selected':''}>p5 (default)</option>
-                        <option value="p6" ${p.speed==='p6'?'selected':''}>p6</option>
-                        <option value="p7" ${p.speed==='p7'?'selected':''}>p7 (best quality)</option>
-                    </select>
+                    <label style="font-size:11px;">Speed: <span id="lpspeed-${escHtml(lpath)}">${p.speed||'p5'}</span></label>
+                    <input type="range" min="1" max="7" value="${parseInt((p.speed||'p5').replace('p',''))||5}" ${isCustom?'':'disabled'} oninput="document.getElementById('lpspeed-${escHtml(lpath)}').textContent='p'+this.value;" onchange="updateLibProfile('${escHtml(lpath)}','speed','p'+this.value)" style="font-size:12px;">
                     <span class="set-desc">p1 = fastest, p7 = best quality</span>
                 </div>
                 <div class="form-group" style="margin:0;">
