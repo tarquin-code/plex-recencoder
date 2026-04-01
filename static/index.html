@@ -2089,6 +2089,16 @@ tr.file-row:hover td { background: var(--bg-hover); }
                 <div class="example-box">
                     <div style="display:grid;gap:12px;">
                         <div>
+                            <div style="font-weight:600;color:var(--text-primary);">v3.2.1 <span style="font-weight:400;font-size:11px;color:var(--text-muted);">— April 2026</span></div>
+                            <ul style="margin:6px 0 0 0;font-size:12px;color:var(--text-secondary);">
+                                <li><strong>Update fix</strong> &mdash; login.html now included in release tarball (was missing, caused Internal Server Error after update)</li>
+                                <li><strong>Restart redirect</strong> &mdash; after service restart, automatically detects protocol change (HTTP/HTTPS) and redirects correctly</li>
+                                <li><strong>Update restart button</strong> &mdash; restart button appears inline next to the green "Updated" button after a successful update</li>
+                                <li><strong>Update error handling</strong> &mdash; update check failures return clean error instead of Internal Server Error</li>
+                                <li><strong>Package script</strong> &mdash; now copies all static HTML files instead of hardcoded list</li>
+                            </ul>
+                        </div>
+                        <div>
                             <div style="font-weight:600;color:var(--text-primary);">v3.2.0 <span style="font-weight:400;font-size:11px;color:var(--text-muted);">— April 2026</span></div>
                             <ul style="margin:6px 0 0 0;font-size:12px;color:var(--text-secondary);">
                                 <li><strong>HTTP webhook port</strong> &mdash; Plex webhook always available on HTTP port 9876, even with SSL enabled</li>
@@ -6837,7 +6847,18 @@ async function applyUpdate(btn) {
                 if (logEl) logEl.textContent += '\nUpdate complete! Restart the service to activate the new version.\n';
                 btn.textContent = 'Updated';
                 btn.style.background = 'var(--success)';
-                // Show restart banner
+                // Add restart button next to updated button
+                let restartBtn = document.getElementById('btnAboutRestart');
+                if (!restartBtn) {
+                    restartBtn = document.createElement('button');
+                    restartBtn.id = 'btnAboutRestart';
+                    restartBtn.className = 'btn btn-danger btn-sm';
+                    restartBtn.style.cssText = 'font-size:12px;margin-left:8px;';
+                    restartBtn.textContent = 'Restart';
+                    restartBtn.onclick = function(){ restartService(restartBtn); };
+                    btn.parentNode.insertBefore(restartBtn, btn.nextSibling);
+                }
+                // Show restart banner too
                 window._restartPending = true;
                 const rb = document.getElementById('restartBanner');
                 if (rb) rb.style.display = 'flex';
@@ -6888,21 +6909,33 @@ async function restartService(btn) {
     try {
         await fetch('/api/setup/install-tool?tool=restart-service', {method: 'POST'});
     } catch(e) {}
-    // Wait for restart — give it time to shut down first
+    // Wait for restart — give it time to shut down first, then try both protocols
     const overlayStatus = document.getElementById('restartOverlayStatus');
     await new Promise(r => setTimeout(r, 3000));
     if (overlayStatus) overlayStatus.textContent = 'Waiting for server...';
+    const host = window.location.hostname;
+    const port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+    const curProto = window.location.protocol.replace(':', '');
+    const altProto = curProto === 'https' ? 'http' : 'https';
+    let attempts = 0;
     const check = setInterval(async () => {
+        attempts++;
+        // Try current protocol first
         try {
-            const r = await fetch('/api/system/check');
+            const r = await fetch(`${curProto}://${host}:${port}/api/system/check`);
             if (r.ok) {
-                // Server is up — reload
                 clearInterval(check);
                 if (overlayStatus) overlayStatus.textContent = 'Loading...';
-                window.location.reload();
+                window.location.href = `${curProto}://${host}:${port}/`;
+                return;
             }
-        } catch(e) {
-            // Server still down
+        } catch(e) {}
+        // After 5 attempts (~7.5s), try the other protocol via navigation
+        if (attempts > 5) {
+            clearInterval(check);
+            if (overlayStatus) overlayStatus.textContent = 'Trying ' + altProto.toUpperCase() + '...';
+            window.location.href = `${altProto}://${host}:${port}/`;
+        } else {
             if (overlayStatus) overlayStatus.textContent = 'Waiting for server...';
         }
     }, 1500);

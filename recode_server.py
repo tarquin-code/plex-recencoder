@@ -63,7 +63,7 @@ import uvicorn
 # =============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-VERSION = "3.2.0"
+VERSION = "3.2.1"
 BIN_DIR = os.path.join(BASE_DIR, "bin")
 os.makedirs(BIN_DIR, exist_ok=True)
 
@@ -6106,10 +6106,16 @@ async def update_check():
         asset_url = ""
         asset_size = 0
         for asset in data.get("assets", []):
-            if asset["name"].endswith(".tar.gz"):
+            if asset["name"] == "recode.tar.gz":
                 asset_url = asset["browser_download_url"]
                 asset_size = asset["size"]
                 break
+        if not asset_url:
+            for asset in data.get("assets", []):
+                if asset["name"].endswith(".tar.gz") and "dmg" not in asset["name"].lower():
+                    asset_url = asset["browser_download_url"]
+                    asset_size = asset["size"]
+                    break
         return {
             "update_available": is_newer,
             "current_version": current,
@@ -6127,8 +6133,10 @@ async def update_check():
 @app.post("/api/update/apply")
 async def update_apply():
     """Download and apply the latest update from GitHub."""
-    # Check for update first
-    check = await update_check()
+    try:
+        check = await update_check()
+    except Exception as e:
+        return {"ok": False, "error": f"Update check failed: {e}"}
     if not check.get("update_available"):
         return {"ok": False, "error": "No update available"}
     url = check.get("download_url")
