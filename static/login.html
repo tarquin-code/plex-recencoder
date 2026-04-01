@@ -34,48 +34,52 @@ body {
 }
 .login-container {
     width: 100%;
-    max-width: 380px;
+    max-width: 440px;
     padding: 20px;
 }
 .login-card {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 32px 28px;
+    padding: 40px 36px;
 }
 .logo {
     text-align: center;
-    margin-bottom: 28px;
+    margin-bottom: 32px;
 }
-.logo svg {
-    width: 36px;
-    height: 36px;
-    vertical-align: middle;
-    margin-right: 8px;
+.logo-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+.logo-row svg {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
 }
 .logo-text {
-    font-size: 24px;
+    font-size: 28px;
     font-weight: 400;
     color: #fff;
 }
 .logo-sub {
     font-size: 12px;
     color: var(--text-muted);
-    margin-top: 4px;
+    margin-top: 6px;
 }
 .form-group {
-    margin-bottom: 16px;
+    margin-bottom: 18px;
 }
 .form-group label {
     display: block;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-secondary);
     margin-bottom: 6px;
     font-weight: 500;
 }
 .form-group input {
     width: 100%;
-    padding: 10px 12px;
+    padding: 11px 14px;
     background: var(--bg-primary);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -91,12 +95,12 @@ body {
 }
 .btn {
     width: 100%;
-    padding: 10px 16px;
+    padding: 11px 16px;
     background: var(--accent-dim);
     color: #fff;
     border: none;
     border-radius: 6px;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
     cursor: pointer;
     transition: background 0.2s;
@@ -118,17 +122,24 @@ body {
     display: none;
 }
 .section-title {
-    font-size: 14px;
+    font-size: 16px;
     font-weight: 600;
     color: var(--text-primary);
-    margin-bottom: 16px;
+    margin-bottom: 18px;
     text-align: center;
 }
 .hint {
     font-size: 11px;
     color: var(--text-muted);
     text-align: center;
-    margin-top: 12px;
+    margin-top: 14px;
+}
+.footer {
+    text-align: center;
+    margin-top: 20px;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.6;
 }
 </style>
 </head>
@@ -136,7 +147,10 @@ body {
 <div class="login-container">
     <div class="login-card">
         <div class="logo">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 9 15 9"/></svg><span class="logo-text">Recode</span>
+            <div class="logo-row">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 9 15 9"/></svg>
+                <span class="logo-text">Recode</span>
+            </div>
             <div class="logo-sub">H.265 GPU/CPU encode with HDR &amp; Dolby Vision</div>
         </div>
 
@@ -161,7 +175,7 @@ body {
         <!-- Password Change Form -->
         <div id="changeForm" style="display:none;">
             <div class="section-title">Set New Password</div>
-            <div style="font-size:12px;color:var(--text-secondary);text-align:center;margin-bottom:16px;">
+            <div style="font-size:12px;color:var(--text-secondary);text-align:center;margin-bottom:18px;">
                 Please change your password before continuing.
             </div>
             <div class="error-msg" id="changeError"></div>
@@ -183,6 +197,10 @@ body {
             </form>
         </div>
     </div>
+    <div class="footer">
+        <div id="versionText"></div>
+        <div>&copy; 2026 Tarquin Douglass &mdash; GPL-3.0</div>
+    </div>
 </div>
 
 <script>
@@ -190,6 +208,9 @@ async function checkStatus() {
     try {
         const r = await fetch('/api/auth/status');
         const s = await r.json();
+        if (s.version) {
+            document.getElementById('versionText').textContent = 'Recode v' + s.version;
+        }
         if (s.authenticated && !s.force_password_change) {
             window.location.href = '/';
             return;

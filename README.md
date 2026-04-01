@@ -2,7 +2,7 @@
 
 **GPU-accelerated H.265/H.264 re-encoding for Plex media libraries with Dolby Vision support.**
 
-![Version](https://img.shields.io/badge/version-3.1.1-blue)
+![Version](https://img.shields.io/badge/version-3.2.0-blue)
 ![License](https://img.shields.io/badge/license-GPL--3.0-green)
 ![Python](https://img.shields.io/badge/python-3.9+-yellow)
 
@@ -218,7 +218,7 @@ All settings are configurable via the web UI at any time.
 
 Auto-encode new media added to Plex:
 1. Plex → Settings → Webhooks
-2. Add: `http://your-server:9877/api/plex-webhook`
+2. Add: `http://your-server:9876/api/plex-webhook` (HTTP webhook port, works with SSL enabled)
 3. New media is automatically queued using library profiles
 
 ## Service Management

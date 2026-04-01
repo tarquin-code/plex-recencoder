@@ -63,7 +63,7 @@ import uvicorn
 # =============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-VERSION = "3.1.1"
+VERSION = "3.2.0"
 BIN_DIR = os.path.join(BASE_DIR, "bin")
 os.makedirs(BIN_DIR, exist_ok=True)
 
@@ -5884,7 +5884,7 @@ async def auth_change_password(request: Request):
 async def auth_status(request: Request):
     token = request.cookies.get("recode_session")
     authenticated = token and token in _active_sessions and _active_sessions[token]["expires_at"] > time.time()
-    return {"authenticated": authenticated, "first_run": FIRST_RUN,
+    return {"authenticated": authenticated, "first_run": FIRST_RUN, "version": VERSION,
             "force_password_change": app_settings.get("auth_force_password_change", True) and not app_settings.get("auth_password_hash")}
 
 @app.post("/api/ssl/upload")
@@ -8454,9 +8454,38 @@ if __name__ == "__main__":
     _ensure_ssl()
     logging.getLogger("uvicorn.access").addFilter(SuppressPollingFilter())
     ssl_kwargs = {}
-    if app_settings.get("ssl_enabled", True) and os.path.isfile(SSL_CERT) and os.path.isfile(SSL_KEY):
+    use_ssl = app_settings.get("ssl_enabled", True) and os.path.isfile(SSL_CERT) and os.path.isfile(SSL_KEY)
+    if use_ssl:
         ssl_kwargs = {"ssl_certfile": SSL_CERT, "ssl_keyfile": SSL_KEY}
-        log.info("SSL enabled — serving HTTPS")
+        log.info("SSL enabled — serving HTTPS on :9877, HTTP webhook on :9876")
+
+        # Start HTTP-only webhook listener on port 9876 for Plex
+        import threading
+        from starlette.applications import Starlette
+        from starlette.routing import Route
+        from starlette.requests import Request as StarletteRequest
+        from starlette.responses import JSONResponse as StarletteJSON, PlainTextResponse
+
+        async def _webhook_proxy(request: StarletteRequest):
+            """Forward webhook to the main app's plex_webhook handler."""
+            body = await request.body()
+            form = await request.form()
+            payload = form.get("payload", "")
+            return await plex_webhook(payload)
+
+        async def _webhook_health(request: StarletteRequest):
+            return PlainTextResponse("ok")
+
+        webhook_app = Starlette(routes=[
+            Route("/api/plex-webhook", _webhook_proxy, methods=["POST"]),
+            Route("/health", _webhook_health),
+        ])
+
+        def _run_webhook_server():
+            uvicorn.run(webhook_app, host="0.0.0.0", port=9876, log_level="warning")
+
+        t = threading.Thread(target=_run_webhook_server, daemon=True)
+        t.start()
     else:
-        log.info("SSL disabled — serving HTTP")
+        log.info("SSL disabled — serving HTTP on :9877")
     uvicorn.run(app, host="0.0.0.0", port=9877, log_level="info", **ssl_kwargs)

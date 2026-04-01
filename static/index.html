@@ -148,8 +148,8 @@ input:disabled, select:disabled { opacity: 0.4; cursor: not-allowed; background:
 .main { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
 .tabs { display: flex; background: var(--bg-secondary); border-bottom: 1px solid var(--border); padding: 0 16px; position: sticky; top: 0; z-index: 50; }
 .tab { padding: 12px 20px; font-size: 13px; font-weight: 500; color: var(--text-secondary); cursor: pointer; border-bottom: 2px solid transparent; transition: all var(--transition); display: flex; align-items: center; gap: 8px; }
-.tab:hover { color: var(--text-primary); }
-.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab:hover { color: var(--text-primary); background: rgba(88,166,255,0.08); border-radius: 6px 6px 0 0; }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); background: rgba(88,166,255,0.08); border-radius: 6px 6px 0 0; }
 .tab-badge { background: var(--accent-dim); color: #fff; font-size: 11px; padding: 1px 7px; border-radius: 10px; font-weight: 600; min-width: 20px; text-align: center; }
 .tab-badge.warn { background: var(--warning-dim); }
 .tab-badge.ok { background: var(--success-dim); }
@@ -1801,7 +1801,7 @@ tr.file-row:hover td { background: var(--bg-hover); }
                     <div class="example-title">Setup</div>
                     <ol style="margin:0;">
                         <li>Open Plex &rarr; Settings &rarr; Webhooks</li>
-                        <li>Add a new webhook URL:<br><code style="font-size:13px;">http://&lt;your-server-ip&gt;:9877/api/plex-webhook</code></li>
+                        <li>Add a new webhook URL:<br><span id="helpWebhookUrl"></span><br><span style="font-size:11px;color:var(--text-muted);">HTTP port 9876 always works. HTTPS port 9877 works with a trusted SSL cert (Let's Encrypt). Click to copy.</span></li>
                         <li>Save. New media additions will now auto-queue for encoding.</li>
                     </ol>
                 </div>
@@ -1910,7 +1910,7 @@ tr.file-row:hover td { background: var(--bg-hover); }
                     <li><strong>Change credentials</strong> &mdash; Settings &rarr; Security &rarr; Authentication. Change username and/or password.</li>
                     <li><strong>Logout</strong> &mdash; click the door icon in the header bar to sign out.</li>
                     <li><strong>API keys</strong> &mdash; programmatic access via <code>Authorization: Bearer &lt;key&gt;</code> header.</li>
-                    <li><strong>Plex webhook</strong> &mdash; the <code>/api/plex-webhook</code> endpoint does not require authentication so Plex can send webhooks.</li>
+                    <li><strong>Plex webhook</strong> &mdash; always available on HTTP port 9876 even when SSL is enabled. With a trusted SSL cert (Let's Encrypt), HTTPS port 9877 also works. No authentication required.</li>
                     <li><strong>Setup wizard</strong> &mdash; authentication is skipped during first-run setup.</li>
                 </ul>
 
@@ -2055,7 +2055,7 @@ tr.file-row:hover td { background: var(--bg-hover); }
             <div class="help-section" id="helpTab-about">
                 <div style="text-align:center;padding:20px 0 10px 0;">
                     <div style="font-size:28px;font-weight:700;background:linear-gradient(135deg, var(--accent), var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Recode</div>
-                    <div style="font-size:16px;color:var(--text-secondary);margin-top:4px;" id="aboutVersion">v3.1.1</div>
+                    <div style="font-size:16px;color:var(--text-secondary);margin-top:4px;" id="aboutVersion">v3.2.0</div>
                 </div>
 
                 <div style="text-align:center;margin:16px 0;">
@@ -2089,8 +2089,13 @@ tr.file-row:hover td { background: var(--bg-hover); }
                 <div class="example-box">
                     <div style="display:grid;gap:12px;">
                         <div>
-                            <div style="font-weight:600;color:var(--text-primary);">v3.1.1 <span style="font-weight:400;font-size:11px;color:var(--text-muted);">— April 2026</span></div>
+                            <div style="font-weight:600;color:var(--text-primary);">v3.2.0 <span style="font-weight:400;font-size:11px;color:var(--text-muted);">— April 2026</span></div>
                             <ul style="margin:6px 0 0 0;font-size:12px;color:var(--text-secondary);">
+                                <li><strong>HTTP webhook port</strong> &mdash; Plex webhook always available on HTTP port 9876, even with SSL enabled</li>
+                                <li><strong>Dynamic webhook URLs</strong> &mdash; settings and help show actual server hostname with HTTPS (trusted cert) or HTTP automatically</li>
+                                <li><strong>Tab hover effect</strong> &mdash; translucent blue highlight on tab hover and active state</li>
+                                <li><strong>Let's Encrypt lock</strong> &mdash; inputs disabled when a valid trusted certificate is already installed</li>
+                                <li><strong>Login page polish</strong> &mdash; larger form, version and copyright footer, aligned logo</li>
                                 <li><strong>Let's Encrypt DNS method</strong> &mdash; choose HTTP (port 80) or DNS (TXT record) verification — no firewall changes needed with DNS</li>
                                 <li><strong>Root password via browser</strong> &mdash; certbot runs with root password entered in the browser, never saved, cleared immediately</li>
                                 <li><strong>Post-install restart</strong> &mdash; inline restart confirmation after Let's Encrypt certificate installation</li>
@@ -3051,10 +3056,11 @@ tr.file-row:hover td { background: var(--bg-hover); }
                     <!-- Plex -->
                     <div style="padding-top:16px;border-top:1px solid var(--border);margin-bottom:20px;">
                         <div style="font-weight:600;font-size:13px;color:var(--text-primary);margin-bottom:4px;">Plex Integration</div>
-                        <div style="font-size:11px;color:var(--text-muted);line-height:1.6;">
-                            <span id="setPlexTokenStatus"></span>
-                            Webhook: <code style="background:var(--bg-tertiary);padding:2px 6px;border-radius:3px;font-size:11px;">http://&lt;server&gt;:9877/api/plex-webhook</code>
-                            <span style="color:var(--text-muted);"> &mdash; Add in Plex &rarr; Settings &rarr; Webhooks. Uses matching library profile or Default.</span>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;"><span id="setPlexTokenStatus"></span></div>
+                        <div style="font-size:11px;color:var(--text-muted);line-height:2;">
+                            Webhook:<br>
+                            <span id="setPlexWebhookUrl"></span><br>
+                            <span style="font-size:11px;color:var(--accent);">Add in Plex &rarr; Settings &rarr; Webhooks. Uses matching library profile or Default. Click to copy.</span>
                         </div>
                     </div>
 
@@ -6318,6 +6324,19 @@ async function openSettings() {
         tokenEl.innerHTML = data.plex_token_found
             ? '<span style="color:#4caf50;">Plex token detected.</span>'
             : '<span style="color:#f44;">Plex token not found.</span>';
+        const webhookEl = document.getElementById('setPlexWebhookUrl');
+        if (webhookEl) {
+            const host = window.location.hostname;
+            const httpUrl = 'http://' + host + ':9876/api/plex-webhook';
+            const httpsUrl = 'https://' + host + ':9877/api/plex-webhook';
+            fetch('/api/ssl/info').then(r=>r.json()).then(ssl=>{
+                if (ssl.ssl_enabled && !ssl.self_signed) {
+                    webhookEl.innerHTML = '<code style="background:var(--bg-tertiary);padding:2px 6px;border-radius:3px;font-size:11px;cursor:pointer;" onclick="navigator.clipboard.writeText(\'' + httpsUrl + '\')" title="Click to copy">' + httpsUrl + '</code> <span style="color:var(--success);font-size:9px;">(trusted SSL)</span><br><code style="background:var(--bg-tertiary);padding:2px 6px;border-radius:3px;font-size:11px;cursor:pointer;" onclick="navigator.clipboard.writeText(\'' + httpUrl + '\')" title="Click to copy">' + httpUrl + '</code> <span style="font-size:9px;color:var(--text-muted);">(HTTP fallback)</span>';
+                } else {
+                    webhookEl.innerHTML = '<code style="background:var(--bg-tertiary);padding:2px 6px;border-radius:3px;font-size:11px;cursor:pointer;" onclick="navigator.clipboard.writeText(\'' + httpUrl + '\')" title="Click to copy">' + httpUrl + '</code>';
+                }
+            }).catch(()=>{ webhookEl.innerHTML = '<code style="background:var(--bg-tertiary);padding:2px 6px;border-radius:3px;font-size:11px;">' + httpUrl + '</code>'; });
+        }
         // Schedule
         document.getElementById('setScheduleEnabled').checked = !!s.schedule_enabled;
         document.getElementById('setScheduleStart').value = s.schedule_start || '00:00';
@@ -7880,6 +7899,28 @@ function renameLibProfile(input, oldPath) {
 
 connectWs();
 checkSystem();
+// Populate dynamic webhook URLs in help
+(async()=>{
+    const host = window.location.hostname;
+    const httpUrl = 'http://' + host + ':9876/api/plex-webhook';
+    const httpsUrl = 'https://' + host + ':9877/api/plex-webhook';
+    const codeStyle = 'font-size:12px;background:var(--bg-tertiary);padding:2px 6px;border-radius:3px;cursor:pointer;';
+    try {
+        const r = await fetch('/api/ssl/info');
+        const ssl = await r.json();
+        const el = document.getElementById('helpWebhookUrl');
+        if (el) {
+            if (ssl.ssl_enabled && !ssl.self_signed) {
+                el.innerHTML = '<code style="' + codeStyle + '" onclick="navigator.clipboard.writeText(\'' + httpsUrl + '\')" title="Click to copy">' + httpsUrl + '</code> <span style="color:var(--success);font-size:10px;">(trusted SSL)</span><br><code style="' + codeStyle + '" onclick="navigator.clipboard.writeText(\'' + httpUrl + '\')" title="Click to copy">' + httpUrl + '</code> <span style="font-size:10px;color:var(--text-muted);">(HTTP fallback)</span>';
+            } else {
+                el.innerHTML = '<code style="' + codeStyle + '" onclick="navigator.clipboard.writeText(\'' + httpUrl + '\')" title="Click to copy">' + httpUrl + '</code>';
+            }
+        }
+    } catch(e) {
+        const el = document.getElementById('helpWebhookUrl');
+        if (el) el.innerHTML = '<code style="font-size:12px;">' + httpUrl + '</code>';
+    }
+})();
 startTranscodePoll();
 // Poll stats — fast when encoding, slow when idle, paused when tab hidden
 fetchAndDrawGraphs();
@@ -7924,15 +7965,28 @@ async function loadSecurityTab() {
     try {
         const r = await fetch('/api/ssl/info');
         const d = await r.json();
+        const leBtn = document.querySelector('[onclick*="secLetsEncrypt"]');
         if (!d.ssl_enabled) {
             el.innerHTML = '<span style="color:var(--warning);">SSL not enabled</span> — No certificate found.';
         } else if (d.error) {
             el.innerHTML = '<span style="color:var(--warning);">SSL enabled</span> — Could not read certificate details.';
         } else {
-            el.innerHTML = `<span style="color:var(--success);">SSL enabled</span>${d.self_signed ? ' (self-signed)' : ''}<br>` +
+            const isTrusted = d.ssl_enabled && !d.self_signed;
+            el.innerHTML = `<span style="color:var(--success);">SSL enabled</span>${d.self_signed ? ' (self-signed)' : ' <span style="color:var(--success);">(trusted)</span>'}<br>` +
                 `Subject: <code style="background:var(--bg-tertiary);padding:1px 5px;border-radius:3px;font-size:11px;">${d.subject || 'N/A'}</code><br>` +
                 `Issuer: <code style="background:var(--bg-tertiary);padding:1px 5px;border-radius:3px;font-size:11px;">${d.issuer || 'N/A'}</code><br>` +
                 `Expires: <code style="background:var(--bg-tertiary);padding:1px 5px;border-radius:3px;font-size:11px;">${d.expires || 'N/A'}</code>`;
+            if (leBtn && isTrusted) {
+                leBtn.disabled = true;
+                leBtn.style.opacity = '0.5';
+                leBtn.textContent = 'Trusted certificate installed';
+                const leStatus = document.getElementById('secLeStatus');
+                if (leStatus) { leStatus.textContent = 'A valid Let\'s Encrypt certificate is already installed.'; leStatus.style.color = 'var(--success)'; }
+                ['leDomain', 'leEmail', 'leSudoPass', 'leMethod'].forEach(id => {
+                    const inp = document.getElementById(id);
+                    if (inp) { inp.disabled = true; inp.style.opacity = '0.5'; }
+                });
+            }
         }
     } catch(e) {
         el.innerHTML = '<span style="color:var(--text-muted);">Could not load SSL info.</span>';
