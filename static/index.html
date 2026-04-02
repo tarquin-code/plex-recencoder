@@ -227,14 +227,14 @@ tr.file-row:hover td { background: var(--bg-hover); }
 .progress-card h3 { font-size: 15px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
 .progress-card .file-detail { font-size: 12px; color: var(--text-secondary); font-family: var(--font-mono); margin-bottom: 16px; word-break: break-all; }
 .progress-bar-container { position: relative; height: 28px; background: var(--bg-primary); border-radius: 14px; overflow: hidden; margin-bottom: 16px; border: 1px solid var(--border); }
-.progress-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent-dim), var(--accent), var(--purple)); background-size: 200% 100%; border-radius: 14px; transition: width 0.5s ease; min-width: 0; }
+.progress-bar-fill { height: 100%; background: linear-gradient(90deg, rgba(31,111,235,0.35), rgba(88,166,255,0.4), rgba(188,140,255,0.35)); background-size: 200% 100%; border-radius: 14px; transition: width 0.5s ease; min-width: 0; }
 .progress-bar-fill.encoding { background-size: 200% 100%; }
 .progress-bar-fill.encoding.pulse { animation: shimmer 2s linear; }
 .progress-bar-fill.preparing { animation: preparing-pulse 1.5s ease-in-out infinite; background: linear-gradient(90deg, var(--bg-tertiary), var(--accent-dim), var(--bg-tertiary)); background-size: 200% 100%; opacity: 0.6; }
-.progress-bar-fill.paused { animation: none; background: #666; }
+.progress-bar-fill.paused { animation: none; background: rgba(102,102,102,0.4); }
 @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 @keyframes preparing-pulse { 0% { background-position: 200% 0; opacity: 0.4; } 50% { opacity: 0.7; } 100% { background-position: -200% 0; opacity: 0.4; } }
-.progress-bar-text { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 400; color: var(--text-primary); text-shadow: 0 1px 3px rgba(0,0,0,0.5); }
+.progress-bar-text { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 400; color: var(--text-primary); text-shadow: 0 1px 2px rgba(0,0,0,0.3); }
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
 .stat-item { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; text-align: center; }
 .stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 4px; }
