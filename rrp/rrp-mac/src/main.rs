@@ -261,7 +261,7 @@ fn update_tray_menu_items(jobs: &[JobLog], transcodes: &[Transcode], connected: 
 
     }
 }
-const VERSION: &str = "3.2.0";
+const VERSION: &str = "3.2.2";
 
 // ── Recode Design System (exact CSS values) ────────────────────────────────
 const BG_PRIMARY: egui::Color32 = egui::Color32::from_rgb(13, 17, 23);
@@ -2012,7 +2012,7 @@ fn main() -> eframe::Result<()> {
             .with_inner_size([800.0, 640.0])
             .with_min_inner_size([460.0, 420.0])
             .with_title("Recode GPU Server")
-            .with_icon(Arc::new(egui::IconData { rgba: vec![0, 0, 0, 0], width: 1, height: 1 })),
+            .with_icon(Arc::new(egui::IconData { rgba: include_bytes!("app_icon.bin").to_vec(), width: 256, height: 256 })),
         ..Default::default()
     }, Box::new(|cc| Ok(Box::new(App::new(cc)))))
 }

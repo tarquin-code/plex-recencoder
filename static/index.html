@@ -640,7 +640,7 @@ tr.file-row:hover td { background: var(--bg-hover); }
                             <option value="4kstream">Stream Ultra (CQ=20, 50M, p5)</option>
                             <option value="stream">Stream High (CQ=20, 25M, p6)</option>
                             <option value="archive">Archive (CQ=18, 40M, p7)</option>
-                            <option value="slow">Slow (CQ=20, 30M, p7)</option>
+                            <option value="slow">Slow (CQ=25, 15M, p7)</option>
                             <option value="small">Small (CQ=28, 10M, p4)</option>
                             <option value="fast">Fast (CQ=30, 8M, p2)</option>
                         </optgroup>
@@ -1196,7 +1196,7 @@ tr.file-row:hover td { background: var(--bg-hover); }
                     </div>
                     <div class="preset-card">
                         <div class="preset-name">Slow</div>
-                        <div class="preset-vals">CQ 20 &bull; 30M &bull; p7</div>
+                        <div class="preset-vals">CQ 25 &bull; 15M &bull; p7</div>
                         <div class="preset-desc">Best compression, takes longer</div>
                     </div>
                     <div class="preset-card">
@@ -2089,6 +2089,19 @@ tr.file-row:hover td { background: var(--bg-hover); }
                 <div class="example-box">
                     <div style="display:grid;gap:12px;">
                         <div>
+                            <div style="font-weight:600;color:var(--text-primary);">v3.2.2 <span style="font-weight:400;font-size:11px;color:var(--text-muted);">— April 2026</span></div>
+                            <ul style="margin:6px 0 0 0;font-size:12px;color:var(--text-secondary);">
+                                <li><strong>NVENC quality</strong> &mdash; added -rc-lookahead 32 and -bufsize (maxrate+5M) for better bitrate distribution in complex scenes</li>
+                                <li><strong>Slow preset</strong> &mdash; changed to CQ 25, 15M, p7</li>
+                                <li><strong>Skipped file detection</strong> &mdash; ffprobe now reads RECODE_SKIPPED tags so skipped files appear in scan results</li>
+                                <li><strong>Duplicate queue prevention</strong> &mdash; files encoded within the last 24 hours are not re-queued</li>
+                                <li><strong>Source-gone handling</strong> &mdash; jobs for already-encoded files are skipped instead of failed</li>
+                                <li><strong>Pager increments</strong> &mdash; page size options now 50-500 in steps of 50</li>
+                                <li><strong>Mac dock icon</strong> &mdash; dock icon now uses the correct AppIcon instead of a transparent pixel</li>
+                                <li><strong>Mac binary updates</strong> &mdash; stale job cleanup, TCP keepalive, 256KB chunks, progress keepalive</li>
+                            </ul>
+                        </div>
+                        <div>
                             <div style="font-weight:600;color:var(--text-primary);">v3.2.1 <span style="font-weight:400;font-size:11px;color:var(--text-muted);">— April 2026</span></div>
                             <ul style="margin:6px 0 0 0;font-size:12px;color:var(--text-secondary);">
                                 <li><strong>Update fix</strong> &mdash; login.html now included in release tarball (was missing, caused Internal Server Error after update)</li>
@@ -2769,7 +2782,7 @@ tr.file-row:hover td { background: var(--bg-hover); }
                                         <option value="4kstream">Stream Ultra (CQ=20, 50M, p5)</option>
                                         <option value="stream">Stream High (CQ=20, 25M, p6)</option>
                                         <option value="archive">Archive (CQ=18, 40M, p7)</option>
-                                        <option value="slow">Slow (CQ=20, 30M, p7)</option>
+                                        <option value="slow">Slow (CQ=25, 15M, p7)</option>
                                         <option value="small">Small (CQ=28, 10M, p4)</option>
                                         <option value="fast">Fast (CQ=30, 8M, p2)</option>
                                     </optgroup>
@@ -4448,7 +4461,7 @@ function jobPagerHtml(prefix, page, pageSize, totalFiles, goFn, changeSizeFn) {
     p += `</div><div style="display:flex;align-items:center;gap:6px;">`;
     p += `<span>${startIdx+1}-${endIdx} of ${totalFiles}</span>`;
     p += `<select class="pager-size-select" onchange="${changeSizeFn}(this.value)">`;
-    for (const n of [25, 50, 100, 200]) p += `<option value="${n}" ${n===pageSize?'selected':''}>${n}</option>`;
+    for (let n = 50; n <= 500; n += 50) p += `<option value="${n}" ${n===pageSize?'selected':''}>${n}</option>`;
     p += `</select></div></div>`;
     return p;
 }
@@ -5882,7 +5895,7 @@ function renderScanResultsFiltered(files) {
         p += `</div><div style="display:flex;align-items:center;gap:6px;">`;
         p += `<span>${startIdx+1}-${endIdx} of ${totalFiles}</span>`;
         p += `<select class="pager-size-select" onchange="changePageSize(this.value)">`;
-        for (const n of [25, 50, 100, 200]) {
+        for (let n = 50; n <= 500; n += 50) {
             p += `<option value="${n}" ${n===pageSize?'selected':''}>${n}</option>`;
         }
         p += `</select></div></div>`;
@@ -7716,7 +7729,7 @@ function renderLibraryProfiles() {
                             <option value="4kstream" ${p.preset==='4kstream'?'selected':''}>Stream Ultra (CQ=20, 50M, p5)</option>
                             <option value="stream" ${p.preset==='stream'?'selected':''}>Stream High (CQ=20, 25M, p6)</option>
                             <option value="archive" ${p.preset==='archive'?'selected':''}>Archive (CQ=18, 40M, p7)</option>
-                            <option value="slow" ${p.preset==='slow'?'selected':''}>Slow (CQ=20, 30M, p7)</option>
+                            <option value="slow" ${p.preset==='slow'?'selected':''}>Slow (CQ=25, 15M, p7)</option>
                             <option value="small" ${p.preset==='small'?'selected':''}>Small (CQ=28, 10M, p4)</option>
                             <option value="fast" ${p.preset==='fast'?'selected':''}>Fast (CQ=30, 8M, p2)</option>
                         </optgroup>

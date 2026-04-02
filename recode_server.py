@@ -63,7 +63,7 @@ import uvicorn
 # =============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-VERSION = "3.2.1"
+VERSION = "3.2.2"
 BIN_DIR = os.path.join(BASE_DIR, "bin")
 os.makedirs(BIN_DIR, exist_ok=True)
 
@@ -225,7 +225,7 @@ PRESETS = {
     "stream":    {"cq": 20, "maxbitrate": "25M", "speed": "p6", "desc": "High quality 1080p streaming"},
     "4kstream":  {"cq": 20, "maxbitrate": "50M", "speed": "p5", "desc": "High quality 4K streaming"},
     "archive":   {"cq": 18, "maxbitrate": "40M", "speed": "p7", "desc": "Maximum quality, slow encode"},
-    "slow":      {"cq": 20, "maxbitrate": "30M", "speed": "p7", "desc": "Slow encode, best compression at high quality"},
+    "slow":      {"cq": 25, "maxbitrate": "15M", "speed": "p7", "desc": "Slow encode, best compression at high quality"},
     "small":     {"cq": 28, "maxbitrate": "10M", "speed": "p4", "desc": "Smaller files, acceptable quality"},
     "fast":      {"cq": 30, "maxbitrate": "8M",  "speed": "p2", "desc": "Fastest encode, lower quality"},
     # Balanced presets — good quality vs size for each resolution
@@ -663,7 +663,7 @@ async def probe_file(path: str) -> dict:
         "-show_entries", "stream_tags=language,title",
         "-show_entries", "stream_side_data=side_data_type",
         "-show_entries", "format=duration,bit_rate",
-        "-show_entries", "format_tags=RECODE",
+        "-show_entries", "format_tags=RECODE,RECODE_SKIPPED",
         "-of", "json",
         path
     ]
@@ -1194,10 +1194,13 @@ def _build_encoder_args(encoder_type, is_h264, cq, speed, maxbitrate):
     if encoder_type == "nvenc":
         codec = "h264_nvenc" if is_h264 else "hevc_nvenc"
         profile = "high" if is_h264 else "main10"
+        maxrate_val = int(maxbitrate.replace("M", "")) if maxbitrate.endswith("M") else 20
+        bufsize = f"{maxrate_val + 5}M"
         return [
             "-c:v", codec, "-rc", "vbr", "-cq", str(cq),
             "-preset", speed, "-profile:v", profile,
-            "-b:v", "0", "-bufsize", maxbitrate, "-maxrate", maxbitrate,
+            "-b:v", "0", "-bufsize", bufsize, "-maxrate", maxbitrate,
+            "-rc-lookahead", "32",
             "-multipass", "qres", "-spatial-aq", "1", "-temporal-aq", "1",
             "-aq-strength", "8",
         ]
@@ -1810,6 +1813,14 @@ class EncodeQueue:
             if j.file_info.get("path") == path:
                 if _settings_match(j.settings):
                     return "Already encoding with identical settings"
+        # Check recent history — skip if already completed recently (within 24h)
+        cutoff = time.time() - 86400
+        for h in reversed(self.history):
+            finished = h.get("finished_at", 0)
+            if finished < cutoff:
+                break
+            if h.get("status") in ("done", "completed") and h.get("file_info", {}).get("path") == path:
+                return "Already encoded within the last 24 hours"
         return ""
 
     def add(self, file_info: dict, settings: dict) -> EncodeJob:
@@ -3666,8 +3677,24 @@ async def encode_worker(worker_id: int):
 
         # Check source file still exists
         if not os.path.exists(info.get("path", "")):
-            log.warning(f"[{job.id}] Source file no longer exists: {info.get('path')}")
-            _finish_job(JobStatus.FAILED, "Source file no longer exists", no_retry=True)
+            # Check if already encoded (output exists in manifest or directory)
+            src_dir = info.get("dirname", "")
+            manifest = read_recode_manifest(src_dir) if src_dir else {}
+            src_name = info.get("filename", "")
+            already_encoded = src_name in manifest
+            if not already_encoded and src_dir:
+                # Check for _recode output file
+                base, ext = os.path.splitext(src_name)
+                for f in os.listdir(src_dir) if os.path.isdir(src_dir) else []:
+                    if f.startswith(base) and "_recode" in f:
+                        already_encoded = True
+                        break
+            if already_encoded:
+                log.info(f"[{job.id}] Source already encoded and deleted — skipping: {info.get('path')}")
+                _finish_job(JobStatus.SKIPPED, "Already encoded — original was deleted")
+            else:
+                log.warning(f"[{job.id}] Source file no longer exists: {info.get('path')}")
+                _finish_job(JobStatus.FAILED, "Source file no longer exists", no_retry=True)
             await manager.broadcast({"type": "state_update", "data": encode_queue.get_state()})
             continue
 
